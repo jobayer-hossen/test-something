@@ -1,3 +1,4 @@
+const http = require('http'); // <-- ADDED THIS LINE
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const fs = require('fs').promises;
 const path = require('path');
@@ -5,6 +6,13 @@ const Logger = require('./logger');
 const config = require('./config');
 const CoinRainFeature = require('./features/coinRain');
 const LootboxSummoningFeature = require('./features/lootboxSummoning');
+
+// ADDED THIS BLOCK TO KEEP THE BOT ALIVE ON RENDER
+http.createServer((req, res) => {
+  res.write("I'm alive");
+  res.end();
+}).listen(process.env.PORT || 3000);
+// ---
 
 const logger = new Logger('Bot');
 
