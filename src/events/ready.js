@@ -9,24 +9,52 @@ module.exports = {
     logger.info(`✅ Bot logged in as ${client.user.tag}`);
     logger.info(`📊 Serving ${client.guilds.cache.size} guild(s)`);
 
-    // Multiple rotating statuses
-    const activities = [
-      { name: 'EPIC-BOTS | Vibing 🎮', type: 'PLAYING' },
-      { name: 'EPIC-BOTS | Coin Rains 🌧️', type: 'WATCHING' },
-      { name: 'EPIC-BOTS | Lootbox Events 🎁', type: 'WATCHING' },
-    ];
+    try {
+      // Set beautiful presence
+      client.user.setPresence({
+        activities: [{
+          name: 'EPIC-BOTS | Vibing 🎮',
+          type: 0,
+        }],
+        status: 'online',
+      });
 
-    let index = 0;
+      logger.info('✅ Presence set successfully!');
 
-    // Set initial status
-    client.user.setActivity(activities[index].name, { type: activities[index].type });
+      // Animated status rotation every 20 seconds
+      setInterval(() => {
+        const activities = [
+          {
+            name: 'EPIC-BOTS | Vibing 🎮',
+            type: 0,
+          },
+          {
+            name: '🌧️ Coin Rains in EPIC-BOTS',
+            type: 3
+          },
+          {
+            name: '🎁 Lootbox Events in EPIC-BOTS',
+            type: 3
+          },
+          {
+            name: '🤝 Invite your friends to EPIC-BOTS',
+            type: 3
+          },
+        ];
 
-    // Change status every 10 seconds
-    setInterval(() => {
-      index = (index + 1) % activities.length;
-      client.user.setActivity(activities[index].name, { type: activities[index].type });
-    }, 10000);
+        const randomActivity = activities[Math.floor(Math.random() * activities.length)];
 
-    logger.info('✅ Status rotations started');
+        client.user.setPresence({
+          activities: [randomActivity],
+          status: 'online',
+        });
+
+        logger.info(`🎭 Status changed: ${randomActivity.type === 0 ? '🎮 Playing' : '👀 Watching'} ${randomActivity.name}`);
+      }, 20000);
+
+      logger.info('✅ Status rotation started with animated emojis!');
+    } catch (error) {
+      logger.error('Error setting presence:', error.message);
+    }
   },
 };

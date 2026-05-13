@@ -96,7 +96,7 @@ module.exports = {
           },
           {
             name: '✨ Bot Features',
-            value: `✅ Auto Event Detection\n✅ Mention Sticker System\n✅ Action Commands (boo, hug, pat, etc)\n✅ Custom Prefix Support`,
+            value: `✅ Auto Event Detection\n✅ Mention Sticker System\n✅ Action Commands (boo, hug, poke, slap)\n✅ Custom Prefix Support`,
             inline: false,
           },
           {

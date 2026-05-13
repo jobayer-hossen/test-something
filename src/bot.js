@@ -1,4 +1,4 @@
-const http = require('http'); // <-- ADDED THIS LINE
+const http = require('http');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const fs = require('fs').promises;
 const path = require('path');
@@ -7,12 +7,11 @@ const config = require('./config');
 const CoinRainFeature = require('./features/coinRain');
 const LootboxSummoningFeature = require('./features/lootboxSummoning');
 
-// ADDED THIS BLOCK TO KEEP THE BOT ALIVE ON RENDER
+// Keep bot alive on Render
 http.createServer((req, res) => {
   res.write("I'm alive");
   res.end();
 }).listen(process.env.PORT || 3000);
-// ---
 
 const logger = new Logger('Bot');
 
@@ -24,12 +23,13 @@ class EpicRPGBot {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.GuildPresences, // Status/Activity
+        GatewayIntentBits.GuildMembers, // Member events
       ],
     });
 
     this.client.commands = new Collection();
     this.client.features = {};
-    this.prefix = 'eb '; // Bot prefix
   }
 
   async initialize() {
@@ -133,11 +133,10 @@ class EpicRPGBot {
 const bot = new EpicRPGBot();
 bot.initialize();
 
-// Get prefix from bot instance
-module.exports = bot;
-
 // Graceful shutdown
 process.on('SIGINT', async () => {
   logger.info('⏹️  Shutting down gracefully...');
   process.exit(0);
 });
+
+module.exports = bot;
