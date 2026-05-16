@@ -3,7 +3,7 @@ const Logger = require('../logger');
 const logger = new Logger('Ready');
 
 module.exports = {
-  name: 'clientReady',
+  name: 'ready',
   once: true,
   execute(client) {
     logger.info(`✅ Bot logged in as ${client.user.tag}`);
@@ -53,8 +53,18 @@ module.exports = {
       }, 20000);
 
       logger.info('✅ Status rotation started with animated emojis!');
+
+      //  ADD THIS: Initialize Aman Trumpet Reminder
+      if (client.features.amanTrumpetReminder) {
+        try {
+          client.features.amanTrumpetReminder.initialize();
+          logger.info('🎺 Aman Trumpet Reminder initialized');
+        } catch (error) {
+          logger.error('Error initializing Aman Trumpet Reminder:', error);
+        }
+      }
     } catch (error) {
-      logger.error('Error setting presence:', error.message);
+      logger.error('Error in ready event:', error.message);
     }
   },
 };

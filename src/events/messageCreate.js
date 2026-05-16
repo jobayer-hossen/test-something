@@ -61,6 +61,11 @@ module.exports = {
           });
         }
 
+        // ADD THIS: Track Aman Trumpet usage
+        if (client.features.amanTrumpetReminder) {
+          await client.features.amanTrumpetReminder.trackUsage(message.author.id, message);
+        }
+
         // Handle coin rain
         if (client.features.coinRain) {
           await client.features.coinRain.handleMessage(message);

@@ -7,6 +7,7 @@ const config = require("./config");
 const database = require("./database/connection");
 const CoinRainFeature = require("./features/coinRain");
 const LootboxSummoningFeature = require("./features/lootboxSummoning");
+const AmanCoinMention = require("./features/amanTrumpetReminder"); // Add this
 
 // Keep bot alive on Render
 http
@@ -35,46 +36,46 @@ class EpicRPGBot {
     this.client.features = {};
   }
 
-async initialize() {
-  try {
-    logger.info("🚀 Initializing Epic RPG Bot...");
-
-    // Connect to database
+  async initialize() {
     try {
-      logger.info("🔌 Connecting to MongoDB...");
-      const dbConnected = await database.connect();
-      
-      if (dbConnected) {
-        logger.info("✅ Database connected successfully!");
-        this.client.db = true; // Store db status
-      } else {
-        logger.warn("⚠️ Bot running without database - Check MONGODB_URI in .env");
+      logger.info("🚀 Initializing Epic RPG Bot...");
+
+      // Connect to database
+      try {
+        logger.info("🔌 Connecting to MongoDB...");
+        const dbConnected = await database.connect();
+        
+        if (dbConnected) {
+          logger.info("✅ Database connected successfully!");
+          this.client.db = true;
+        } else {
+          logger.warn("⚠️ Bot running without database - Check MONGODB_URI in .env");
+          this.client.db = false;
+        }
+      } catch (dbError) {
+        logger.error("Database connection error:", dbError.message);
+        logger.warn("⚠️ Continuing without database...");
         this.client.db = false;
       }
-    } catch (dbError) {
-      logger.error("Database connection error:", dbError.message);
-      logger.warn("⚠️ Continuing without database...");
-      this.client.db = false;
+
+      // Load features
+      this.loadFeatures();
+
+      // Load commands
+      await this.loadCommands();
+
+      // Load events
+      await this.loadEvents();
+
+      // Login to Discord
+      await this.client.login(config.discord.token);
+
+      logger.info("✅ Bot initialization complete!");
+    } catch (error) {
+      logger.error("Fatal error during initialization:", error.message);
+      process.exit(1);
     }
-
-    // Load features
-    this.loadFeatures();
-
-    // Load commands
-    await this.loadCommands();
-
-    // Load events
-    await this.loadEvents();
-
-    // Login to Discord
-    await this.client.login(config.discord.token);
-
-    logger.info("✅ Bot initialization complete!");
-  } catch (error) {
-    logger.error("Fatal error during initialization:", error.message);
-    process.exit(1);
   }
-}
 
   loadFeatures() {
     logger.info("📦 Loading features...");
@@ -86,6 +87,10 @@ async initialize() {
       this.client,
     );
     logger.debug("✅ LootboxSummoning feature loaded");
+
+    // Add Aman Trumpet Reminder
+    this.client.features.amanTrumpetReminder = new AmanCoinMention(this.client);
+    logger.debug("✅ Aman Trumpet Reminder feature loaded");
 
     logger.info("✅ All features loaded successfully");
   }
@@ -157,6 +162,12 @@ bot.initialize();
 // Graceful shutdown
 process.on("SIGINT", async () => {
   logger.info("⏹️  Shutting down gracefully...");
+  
+  // Stop Aman Trumpet Reminder
+  if (bot.client.features.amanTrumpetReminder) {
+    bot.client.features.amanTrumpetReminder.stop();
+  }
+  
   process.exit(0);
 });
 
