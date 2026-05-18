@@ -71,7 +71,7 @@ class LootboxSummoningFeature {
       }
 
       const roleId = '1470272874161111061';
-      const summonMessage = `<@&${roleId}> If you went EDGY! then spam Summon!`;
+      const summonMessage = `<@&${roleId}> If you want EDGY! then spam Summon!`;
 
       await message.channel.send({
         content: summonMessage,
