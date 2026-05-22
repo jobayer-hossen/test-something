@@ -8,6 +8,7 @@ const database = require("./database/connection");
 const CoinRainFeature = require("./features/coinRain");
 const LootboxSummoningFeature = require("./features/lootboxSummoning");
 const AmanCoinMention = require("./features/amanTrumpetReminder"); // Add this
+const RPGTracker = require("./features/rpgTracker");
 
 // Keep bot alive on Render
 http
@@ -44,12 +45,14 @@ class EpicRPGBot {
       try {
         logger.info("🔌 Connecting to MongoDB...");
         const dbConnected = await database.connect();
-        
+
         if (dbConnected) {
           logger.info("✅ Database connected successfully!");
           this.client.db = true;
         } else {
-          logger.warn("⚠️ Bot running without database - Check MONGODB_URI in .env");
+          logger.warn(
+            "⚠️ Bot running without database - Check MONGODB_URI in .env",
+          );
           this.client.db = false;
         }
       } catch (dbError) {
@@ -93,6 +96,10 @@ class EpicRPGBot {
     logger.debug("✅ Aman Trumpet Reminder feature loaded");
 
     logger.info("✅ All features loaded successfully");
+
+    // Add RPG Tracker feature
+    this.client.features.rpgTracker = new RPGTracker(this.client);
+    logger.debug("✅ RPG Tracker feature loaded");
   }
 
   async loadCommands() {
@@ -162,12 +169,12 @@ bot.initialize();
 // Graceful shutdown
 process.on("SIGINT", async () => {
   logger.info("⏹️  Shutting down gracefully...");
-  
+
   // Stop Aman Trumpet Reminder
   if (bot.client.features.amanTrumpetReminder) {
     bot.client.features.amanTrumpetReminder.stop();
   }
-  
+
   process.exit(0);
 });
 

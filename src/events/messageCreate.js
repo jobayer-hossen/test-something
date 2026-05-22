@@ -58,11 +58,15 @@ module.exports = {
 
         // Check if the owner is mentioned BUT NOT as a reply
         const isDirectMention =
-          message.mentions.has(ownerID) &&
+          message.mentions.users.has(ownerID) &&
           message.reference === null &&
-          !message.author.bot; // No reply reference
+          !message.author.bot;
 
-        if (isDirectMention) {
+        const containsIdLiteral =
+          message.content.includes(`<@${ownerID}>`) ||
+          message.content.includes(`<@!${ownerID}>`);
+          
+        if (isDirectMention && containsIdLiteral) {
           const stickers = [
             "https://cdn.discordapp.com/emojis/1472947968821694466.webp?size=96",
             "https://cdn.discordapp.com/emojis/1472948142591971462.webp?size=96",
@@ -102,6 +106,11 @@ module.exports = {
         // Handle lootbox summoning
         if (client.features.lootboxSummoning) {
           await client.features.lootboxSummoning.handleMessage(message);
+        }
+
+        // Handle RPG Tracker
+        if (client.features.rpgTracker) {
+          await client.features.rpgTracker.handleMessage(message);
         }
       } catch (error) {
         logger.error("Error processing message:", error.message);
