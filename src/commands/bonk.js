@@ -12,13 +12,13 @@ module.exports = {
       const user = message.mentions.users.first();
 
       if (!user) {
-        return await message.reply(
+        return await message.channel.send(
           "❌ Please mention someone! Usage: `eb bonk @user`",
         );
       }
 
       if (user.id === message.author.id) {
-        return await message.reply("🔨 You bonked yourself! Go to horny jail!");
+        return await message.channel.send("🔨 You bonked yourself! Go to horny jail!");
       }
 
       const bonkMessages = [
@@ -56,7 +56,7 @@ module.exports = {
           iconURL: client.user.avatarURL(),
         });
 
-      await message.reply({ embeds: [embed] });
+      await message.channel.send({ embeds: [embed] });
 
       await message.react("🔨");
       await message.react("⚾");
@@ -65,7 +65,7 @@ module.exports = {
     } catch (error) {
       logger.error("Error in bonk command:", error.message);
 
-      await message.reply("❌ An error occurred!");
+      await message.channel.send("❌ An error occurred!");
     }
   },
 };

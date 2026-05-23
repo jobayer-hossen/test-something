@@ -12,10 +12,10 @@ module.exports = {
     try {
       // Check if user is admin (change this ID to your admin ID)
       if (message.author.id !== '782630678389981244') {
-        return await message.reply('❌ Only admins can use this command!');
+        return await message.channel.send('❌ Only admins can use this command!');
       }
 
-      const thinkingMsg = await message.reply('🧹 Cleaning database...');
+      const thinkingMsg = await message.channel.send('🧹 Cleaning database...');
 
       // Get bot user IDs from guild
       const botIds = message.guild.members.cache
@@ -50,7 +50,7 @@ module.exports = {
       logger.info(`Cleaned ${result.deletedCount} bot users from database`);
     } catch (error) {
       logger.error('Error in cleandb command:', error.message);
-      await message.reply('❌ An error occurred!');
+      await message.channel.send('❌ An error occurred!');
     }
   },
 };

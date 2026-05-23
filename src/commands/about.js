@@ -100,11 +100,11 @@ module.exports = {
           iconURL: client.user.avatarURL(),
         });
 
-      await message.reply({ embeds: [embed] });
+      await message.channel.send({ embeds: [embed] });
       logger.info(`About command used by ${message.author.tag}`);
     } catch (error) {
       logger.error('Error in about command:', error.message);
-      await message.reply('❌ An error occurred!');
+      await message.channel.send('❌ An error occurred!');
     }
   },
 };

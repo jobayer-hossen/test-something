@@ -12,13 +12,13 @@ module.exports = {
       const user = message.mentions.users.first();
 
       if (!user) {
-        return await message.reply(
+        return await message.channel.send(
           "❌ Please mention someone! Usage: `eb kill @user`",
         );
       }
 
       if (user.id === message.author.id) {
-        return await message.reply(
+        return await message.channel.send(
           "😵 You tried to kill yourself! That's illegal!",
         );
       }
@@ -62,14 +62,14 @@ module.exports = {
           iconURL: client.user.avatarURL(),
         });
 
-      await message.reply({ embeds: [embed] });
+      await message.channel.send({ embeds: [embed] });
       await message.react("💀");
       await message.react("⚔️");
 
       logger.info(`${message.author.tag} killed ${user.tag}`);
     } catch (error) {
       logger.error("Error in kill command:", error.message);
-      await message.reply("❌ An error occurred!");
+      await message.channel.send("❌ An error occurred!");
     }
   },
 };

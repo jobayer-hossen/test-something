@@ -17,7 +17,7 @@ module.exports = {
       const user = await userService.getOrCreateUser(targetUser.id, targetUser.username);
 
       if (!user) {
-        return await message.reply('❌ Could not fetch user profile!');
+        return await message.channel.send('❌ Could not fetch user profile!');
       }
 
       // Get user rank
@@ -81,7 +81,7 @@ module.exports = {
           iconURL: client.user.avatarURL(),
         });
 
-      await message.reply({ embeds: [embed] });
+      await message.channel.send({ embeds: [embed] });
 
       // Track command usage
       await userService.incrementCommandsUsed(message.author.id);
@@ -89,7 +89,7 @@ module.exports = {
       logger.info(`Profile viewed for ${targetUser.tag}`);
     } catch (error) {
       logger.error('Error in profile command:', error.message);
-      await message.reply('❌ An error occurred!');
+      await message.channel.send('❌ An error occurred!');
     }
   },
 

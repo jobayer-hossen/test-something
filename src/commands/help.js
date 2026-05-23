@@ -94,7 +94,7 @@ module.exports = {
             .setStyle(ButtonStyle.Danger)
         );
 
-      const reply = await message.reply({ 
+      const reply = await message.channel.send({ 
         embeds: [mainEmbed],
         components: [buttons]
       });
@@ -266,7 +266,7 @@ module.exports = {
       logger.info(`Help command used by ${message.author.tag}`);
     } catch (error) {
       logger.error('Error in help command:', error.message);
-      await message.reply('❌ An error occurred!');
+      await message.channel.send('❌ An error occurred!');
     }
   },
 };

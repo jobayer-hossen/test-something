@@ -7,14 +7,14 @@ module.exports = {
     const validCommands = ["produce", "hunt", "adventure", "training", "chop", "fish", "mine", "pickup"];
     
     if (args.length < 2) {
-      return message.reply(`❓ Usage: \`eb track <command> <on/off>\` \nValid commands: ${validCommands.join(", ")}`);
+      return message.channel.send(`❓ Usage: \`eb track <command> <on/off>\` \nValid commands: ${validCommands.join(", ")}`);
     }
 
     const commandToTrack = args[0].toLowerCase();
     const status = args[1].toLowerCase();
 
     if (!validCommands.includes(commandToTrack)) {
-      return message.reply("❌ Invalid command name.");
+      return message.channel.send("❌ Invalid command name.");
     }
 
     const isEnabled = status === "on";
@@ -26,9 +26,9 @@ module.exports = {
         { upsert: true, new: true }
       );
 
-      message.reply(`✅ Tracker for **${commandToTrack}** is now turned **${isEnabled ? "ON" : "OFF"}**.`);
+      message.channel.send(`✅ Tracker for **${commandToTrack}** is now turned **${isEnabled ? "ON" : "OFF"}**.`);
     } catch (error) {
-      message.reply("❌ Database error while saving settings.");
+      message.channel.send("❌ Database error while saving settings.");
     }
   },
 };

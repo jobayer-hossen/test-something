@@ -24,7 +24,7 @@ module.exports = {
       const topUsers = await userService.getTopUsers(10, sortField);
 
       if (!topUsers || topUsers.length === 0) {
-        return await message.reply('❌ No users found in database!');
+        return await message.channel.send('❌ No users found in database!');
       }
 
       // Build leaderboard string
@@ -55,7 +55,7 @@ module.exports = {
           iconURL: client.user.avatarURL(),
         });
 
-      await message.reply({ embeds: [embed] });
+      await message.channel.send({ embeds: [embed] });
 
       // Track command usage
       await userService.incrementCommandsUsed(message.author.id);
@@ -63,7 +63,7 @@ module.exports = {
       logger.info(`Leaderboard viewed (sorted by ${sortField})`);
     } catch (error) {
       logger.error('Error in leaderboard command:', error.message);
-      await message.reply('❌ An error occurred!');
+      await message.channel.send('❌ An error occurred!');
     }
   },
 

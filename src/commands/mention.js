@@ -23,7 +23,7 @@ module.exports = {
         const randomSticker = stickers[Math.floor(Math.random() * stickers.length)];
 
         // Send sticker
-        await message.reply({
+        await message.channel.send({
           content: randomSticker,
           allowedMentions: { repliedUser: false },
         });

@@ -45,7 +45,7 @@ module.exports = {
               `Error executing command ${commandName}:`,
               error.message,
             );
-            await message.reply(
+            await message.channel.send(
               "❌ An error occurred while executing this command!",
             );
           }
@@ -84,7 +84,7 @@ module.exports = {
           const randomSticker =
             stickers[Math.floor(Math.random() * stickers.length)];
 
-          await message.reply({
+          await message.channel.send({
             content: randomSticker,
             allowedMentions: { repliedUser: false },
           });

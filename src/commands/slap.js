@@ -12,11 +12,11 @@ module.exports = {
       const user = message.mentions.users.first();
 
       if (!user) {
-        return await message.reply('❌ Please mention someone! Usage: `eb slap @user`');
+        return await message.channel.send('❌ Please mention someone! Usage: `eb slap @user`');
       }
 
       if (user.id === message.author.id) {
-        return await message.reply('🤕 You slapped yourself! Ouch!');
+        return await message.channel.send('🤕 You slapped yourself! Ouch!');
       }
 
       const slapMessages = [
@@ -56,14 +56,14 @@ module.exports = {
           iconURL: client.user.avatarURL(),
         });
 
-      await message.reply({ embeds: [embed] });
+      await message.channel.send({ embeds: [embed] });
       await message.react('👋');
       await message.react('💥');
 
       logger.info(`${message.author.tag} slapped ${user.tag}`);
     } catch (error) {
       logger.error('Error in slap command:', error.message);
-      await message.reply('❌ An error occurred!');
+      await message.channel.send('❌ An error occurred!');
     }
   },
 };

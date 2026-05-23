@@ -12,11 +12,11 @@ module.exports = {
       const user = message.mentions.users.first();
 
       if (!user) {
-        return await message.reply('❌ Please mention someone! Usage: `eb hug @user`');
+        return await message.channel.send('❌ Please mention someone! Usage: `eb hug @user`');
       }
 
       if (user.id === message.author.id) {
-        return await message.reply('🤗 You gave yourself a hug! That\'s wholesome!');
+        return await message.channel.send('🤗 You gave yourself a hug! That\'s wholesome!');
       }
 
       const hugMessages = [
@@ -52,14 +52,14 @@ module.exports = {
           iconURL: client.user.avatarURL(),
         });
 
-      await message.reply({ embeds: [embed] });
+      await message.channel.send({ embeds: [embed] });
       await message.react('🤗');
       await message.react('💙');
 
       logger.info(`${message.author.tag} hugged ${user.tag}`);
     } catch (error) {
       logger.error('Error in hug command:', error.message);
-      await message.reply('❌ An error occurred!');
+      await message.channel.send('❌ An error occurred!');
     }
   },
 };
