@@ -170,15 +170,6 @@ class AmanTrumpetReminder {
       return { active: false, error: error.message };
     }
   }
-
-  // Stop the reminder system
-  stop() {
-    if (this.checkInterval) {
-      clearInterval(this.checkInterval);
-      this.isInitialized = false;
-      logger.info('🛑 Aman Trumpet Reminder system stopped');
-    }
-  }
 }
 
 module.exports = AmanTrumpetReminder;

@@ -20,8 +20,6 @@ module.exports = {
         return await message.channel.send('❌ Could not fetch user profile!');
       }
 
-      // Get user rank
-      const rank = await userService.getUserRank(targetUser.id, 'coins');
 
       // Create profile embed
       const embed = new EmbedBuilder()
@@ -55,11 +53,6 @@ module.exports = {
             inline: true,
           },
           {
-            name: '🏆 Rank (by coins)',
-            value: `#${rank}`,
-            inline: true,
-          },
-          {
             name: '📅 Member Since',
             value: `<t:${Math.floor(user.createdAt.getTime() / 1000)}:R>`,
             inline: true,
@@ -82,9 +75,6 @@ module.exports = {
         });
 
       await message.channel.send({ embeds: [embed] });
-
-      // Track command usage
-      await userService.incrementCommandsUsed(message.author.id);
 
       logger.info(`Profile viewed for ${targetUser.tag}`);
     } catch (error) {

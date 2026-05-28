@@ -8,7 +8,7 @@ const database = require("./database/connection");
 const CoinRainFeature = require("./features/coinRain");
 const LootboxSummoningFeature = require("./features/lootboxSummoning");
 const AmanCoinMention = require("./features/amanTrumpetReminder"); // Add this
-const RPGTracker = require("./features/rpgTracker");
+const BaseManager = require("./features/baseManager");
 
 // Keep bot alive on Render
 http
@@ -97,9 +97,9 @@ class EpicRPGBot {
 
     logger.info("✅ All features loaded successfully");
 
-    // Add RPG Tracker feature
-    this.client.features.rpgTracker = new RPGTracker(this.client);
-    logger.debug("✅ RPG Tracker feature loaded");
+    // Add RPG Base Manager feature
+    this.client.features.baseManager = new BaseManager(this.client);
+    logger.debug("✅ Base Manager feature loaded");
   }
 
   async loadCommands() {
@@ -169,11 +169,6 @@ bot.initialize();
 // Graceful shutdown
 process.on("SIGINT", async () => {
   logger.info("⏹️  Shutting down gracefully...");
-
-  // Stop Aman Trumpet Reminder
-  if (bot.client.features.amanTrumpetReminder) {
-    bot.client.features.amanTrumpetReminder.stop();
-  }
 
   process.exit(0);
 });

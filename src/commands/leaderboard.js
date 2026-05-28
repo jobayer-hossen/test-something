@@ -57,9 +57,6 @@ module.exports = {
 
       await message.channel.send({ embeds: [embed] });
 
-      // Track command usage
-      await userService.incrementCommandsUsed(message.author.id);
-
       logger.info(`Leaderboard viewed (sorted by ${sortField})`);
     } catch (error) {
       logger.error('Error in leaderboard command:', error.message);
