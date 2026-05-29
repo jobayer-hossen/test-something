@@ -65,7 +65,7 @@ module.exports = {
         const containsIdLiteral =
           message.content.includes(`<@${ownerID}>`) ||
           message.content.includes(`<@!${ownerID}>`);
-          
+
         if (isDirectMention && containsIdLiteral) {
           const stickers = [
             "https://cdn.discordapp.com/emojis/1472947968821694466.webp?size=96",
@@ -97,20 +97,13 @@ module.exports = {
             message,
           );
         }
-
-        // Handle coin rain
-        if (client.features.coinRain) {
-          await client.features.coinRain.handleMessage(message);
+      
+        if (client.features?.coinRain) {
+          client.features.coinRain.handleMessage(message);
         }
 
-        // Handle lootbox summoning
-        if (client.features.lootboxSummoning) {
-          await client.features.lootboxSummoning.handleMessage(message);
-        }
-
-        // Handle RPG Tracker
-        if (client.features.rpgTracker) {
-          await client.features.rpgTracker.handleMessage(message);
+        if (client.features?.lootboxSummoning) {
+          client.features.lootboxSummoning.handleMessage(message);
         }
       } catch (error) {
         logger.error("Error processing message:", error.message);

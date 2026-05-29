@@ -4,61 +4,65 @@ const logger = new Logger("CoinRain");
 class CoinRainFeature {
   constructor(client) {
     this.client = client;
-
-    // Direct listener for speed
-    this.client.on("messageCreate", (message) => {
-      this.handleMessage(message);
-    });
   }
 
-  handleMessage(message) {
+  async handleMessage(message) {
     try {
-      // 🔥 Instant author filter
-      if (message.author.id !== "555955826880413696") return;
+      if (!message.inGuild()) return;
+      if (!message.author || message.author.id !== "555955826880413696") return;
+      if (!message.embeds || message.embeds.length === 0) return;
 
-      const embed = message.embeds?.[0];
-      if (!embed) return;
+      const embed = message.embeds[0];
 
-      // 🔥 Only check embed title/description (fast)
-      const text = `${embed.title || ""} ${embed.description || ""}`;
+      // ✅ Build searchable text (title + description + fields)
+      let text = "";
 
-      if (!text.includes("IT'S RAINING COINS")) return;
+      if (embed.title) text += embed.title + " ";
+      if (embed.description) text += embed.description + " ";
 
-      // 🔥 Extract LAST number only from this text
+      if (embed.fields && embed.fields.length > 0) {
+        for (const field of embed.fields) {
+          if (field.name) text += field.name + " ";
+          if (field.value) text += field.value + " ";
+        }
+      }
+
+      const upperText = text.toUpperCase();
+
+      // ✅ Flexible detection
+      if (!upperText.includes("RAIN") || !upperText.includes("COIN")) return;
+
+      // ✅ Extract numbers
       const numbers = text.match(/\d+(?:,\d{3})*(?:\.\d+)?/g);
-      if (!numbers) return;
+      if (!numbers || numbers.length === 0) return;
 
-      const last = numbers[numbers.length - 1].replace(/,/g, "");
-      const maxReward = parseInt(last, 10);
+      const lastNumber = numbers[numbers.length - 1].replace(/,/g, "");
+      const maxReward = parseInt(lastNumber, 10);
       if (!maxReward) return;
 
-      // 🔥 1 Quadrillion check (1Q)
-      if (maxReward < 1_000_000_000_000_000) return;
+      // ✅ 1 Quadrillion minimum check
+      if (maxReward < 1_000_000_000_000_000) {
+        logger.debug(`Coin rain ignored: ${maxReward}`);
+        return;
+      }
 
-      this.triggerCoinRain(message, maxReward);
+      const roleId = "1470272824500555980";
+      const formatted = maxReward.toLocaleString();
 
-    } catch (err) {
-      logger.error("Handle error:", err.message);
-    }
-  }
+      const sent = await message.channel.send({
+         content: `<@&${roleId}> Be honest… you NEED those **${formatted}** coins. Type **CATCH**.`,
+        allowedMentions: { parse: ["roles"] },
+      });
 
-  triggerCoinRain(message, maxReward) {
-    const roleId = "1470272824500555980";
-
-    const formatted = maxReward.toLocaleString();
-
-    // 🚀 Instant send (non-blocking)
-    message.channel.send({
-      content: `<@&${roleId}> Be honest… you NEED those **${formatted}** coins. Type **CATCH**.`,
-      allowedMentions: { parse: ["roles"] },
-    }).then((sent) => {
-
-      // ⏳ Delete after 60s
       setTimeout(() => {
         sent.delete().catch(() => {});
-      }, 60000);
+      }, 30000);
 
-    }).catch(() => {});
+      logger.info(`✅ Coin Rain triggered: ${formatted}`);
+
+    } catch (err) {
+      logger.error("CoinRain error:", err);
+    }
   }
 }
 

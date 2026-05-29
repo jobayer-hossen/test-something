@@ -4,54 +4,50 @@ const logger = new Logger("LootboxSummoning");
 class LootboxSummoningFeature {
   constructor(client) {
     this.client = client;
-
-    // Bind listener directly for maximum speed
-    this.client.on("messageCreate", (message) => {
-      this.handleMessage(message);
-    });
   }
 
   async handleMessage(message) {
     try {
-      // 🔥 Instant filter (fastest possible exit)
-      if (message.author.id !== "555955826880413696") return;
+      if (!message.inGuild()) return;
+      if (!message.author || message.author.id !== "555955826880413696") return;
 
-      // 🔥 Must have embed
-      const embed = message.embeds?.[0];
-      if (!embed) return;
+      if (!message.embeds || message.embeds.length === 0) return;
 
-      // 🔥 Direct string check (NO LOOPS)
-      if (
-        embed.title?.includes("LOOTBOX SUMMONING HAS STARTED") ||
-        embed.description?.includes("LOOTBOX SUMMONING HAS STARTED")
-      ) {
-        this.triggerSummoning(message);
+      const embed = message.embeds[0];
+
+      // ✅ Build searchable text safely
+      let text = "";
+
+      if (embed.title) text += embed.title + " ";
+      if (embed.description) text += embed.description + " ";
+
+      if (embed.fields && embed.fields.length > 0) {
+        for (const field of embed.fields) {
+          if (field.name) text += field.name + " ";
+          if (field.value) text += field.value + " ";
+        }
       }
 
-    } catch (err) {
-      logger.error("Handle error:", err.message);
-    }
-  }
+      text = text.toUpperCase();
 
-  triggerSummoning(message) {
-    try {
+      // ✅ Flexible detection (future proof)
+      if (!text.includes("LOOTBOX") || !text.includes("SUMMON")) return;
+
       const roleId = "1470272874161111061";
 
-      // 🚀 Instant send (no await = non-blocking)
-      message.channel.send({
-        content: `<@&${roleId}> If you want EDGY! then type **SUMMON**!`,
+      const sent = await message.channel.send({
+       content: `<@&${roleId}> If you want EDGY! then spam **SUMMON**!`,
         allowedMentions: { parse: ["roles"] },
-      }).then((sentMessage) => {
+      });
 
-        // ⏳ Auto delete after 60 sec
-        setTimeout(() => {
-          sentMessage.delete().catch(() => {});
-        }, 60000);
+      setTimeout(() => {
+        sent.delete().catch(() => {});
+      }, 60000);
 
-      }).catch(() => {});
+      logger.info("✅ Lootbox triggered successfully");
 
     } catch (err) {
-      logger.error("Trigger error:", err.message);
+      logger.error("Lootbox error:", err);
     }
   }
 }
