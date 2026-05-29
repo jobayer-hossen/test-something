@@ -13,7 +13,7 @@ module.exports = {
     }
 
     // --- CREATE ---
-    if (subCommand === 'create') {
+    if (subCommand === 'noocreate') {
       const user = await userService.getOrCreateUser(message.author.id, message.author.username);
       if (user.level < 10) return message.channel.send(`❌ You need **Level 10** to unlock a room!`);
 
