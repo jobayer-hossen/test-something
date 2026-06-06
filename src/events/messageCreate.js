@@ -1,5 +1,6 @@
 const Logger = require("../logger");
 const userService = require("../database/services/userService");
+const PersonalChannel = require("../database/schemas/PersonalChannel"); // Add this
 
 const logger = new Logger("MessageCreate");
 
@@ -10,15 +11,23 @@ module.exports = {
       if (!message.guild) return;
       if (message.author.id === client.user.id) return;
 
-      // Track user activity (ONLY FOR REAL USERS, NOT BOTS)
+      // Track user activity (XP)
       if (!message.author.bot) {
         try {
           await userService.getOrCreateUser(
             message.author.id,
             message.author.username,
-            message.author.bot, // Pass bot status
+            message.author.bot,
           );
           await userService.addXP(message.author.id, 1);
+
+          // --- ADDED: TRACK ROOM ACTIVITY ---
+          // This updates the 'lastActivity' date so the room doesn't get archived
+          await PersonalChannel.findOneAndUpdate(
+            { channelId: message.channel.id },
+            { lastActivity: new Date() },
+          ).catch(() => null);
+          // ----------------------------------
         } catch (error) {
           logger.debug("Error tracking user:", error.message);
         }
@@ -53,10 +62,8 @@ module.exports = {
       }
 
       try {
-        // Handle mentions - ONLY for direct mentions, NOT replies
+        // Handle owner mentions
         const ownerID = "782630678389981244";
-
-        // Check if the owner is mentioned BUT NOT as a reply
         const isDirectMention =
           message.mentions.users.has(ownerID) &&
           message.reference === null &&
@@ -91,13 +98,14 @@ module.exports = {
         }
 
         // Track Aman Trumpet usage
-        if (client.features.amanTrumpetReminder) {
+        if (client.features?.amanTrumpetReminder) {
           await client.features.amanTrumpetReminder.trackUsage(
             message.author.id,
             message,
           );
         }
-      
+
+        // Handle RPG features
         if (client.features?.coinRain) {
           client.features.coinRain.handleMessage(message);
         }
@@ -106,7 +114,7 @@ module.exports = {
           client.features.lootboxSummoning.handleMessage(message);
         }
       } catch (error) {
-        logger.error("Error processing message:", error.message);
+        logger.error("Error processing message triggers:", error.message);
       }
     } catch (error) {
       logger.error("Critical error in messageCreate:", error.message);

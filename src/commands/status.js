@@ -49,7 +49,7 @@ module.exports = {
           },
           {
             name: "🚀 Feature Status",
-            value: `🌧️ Coin Rain: ${getStatus(client.features.coinRain)}\n🎁 Lootbox: ${getStatus(client.features.lootboxSummoning)}\n⏰ RPG Tracker: ${getStatus(client.features.rpgTracker)}`,
+            value: `🌧️ Coin Rain: ${getStatus(client.features.coinRain)}\n🎁 Lootbox: ${getStatus(client.features.lootboxSummoning)}`,
             inline: true,
           }
         )

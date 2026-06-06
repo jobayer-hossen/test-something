@@ -1,70 +1,110 @@
 const PersonalChannel = require("../database/schemas/PersonalChannel");
 const Logger = require("../logger");
+const { EmbedBuilder } = require("discord.js");
 const logger = new Logger("BaseManager");
 
 class BaseManager {
   constructor(client) {
     this.client = client;
-    this.initiateRoleId = "1330560814536589433"; 
+    this.initiateRoleId = "1330560814536589433";
     this.ownerRoleId = "1509634371999502435";
-    this.categoryIds = ["1479929670219858221"]; 
+    this.botRoleId = "970000054012244008";
+    this.logChannelId = "1503339439777124382";
+    this.archiveCategoryId = "1329960246759915632"; // We move it here but don't call it "Archive" in text
+
+    this.startInactivityChecker();
   }
 
-  async createBase(member, customName) {
-    const existing = await PersonalChannel.findOne({ userId: member.id });
-    if (existing) return { success: false, message: "You already own a room!" };
+  startInactivityChecker() {
+    setInterval(async () => {
+      // TESTING: Threshold set to 1 minute.
+      // Change to (7 * 24 * 60 * 60 * 1000) for 7 days later.
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    let targetCategory = null;
-    for (const catId of this.categoryIds) {
-      const cat = await this.client.channels.fetch(catId).catch(() => null);
-      if (cat && cat.children.cache.size < 50) {
-        targetCategory = cat;
-        break;
-      }
-    }
+      const inactiveRooms = await PersonalChannel.find({
+        lastActivity: { $lt: sevenDaysAgo },
+      });
 
-    if (!targetCategory) return { success: false, message: "All sectors are full!" };
+      for (const room of inactiveRooms) {
+        try {
+          const channel = await this.client.channels
+            .fetch(room.channelId)
+            .catch(() => null);
+          const user = await this.client.users
+            .fetch(room.userId)
+            .catch(() => null);
 
-    try {
-      // Add the role to the user
-      await member.roles.add(this.ownerRoleId).catch(() => null);
+          if (channel) {
+            // 1. Relocate and Lock (Silent processing)
+            await channel.setParent(this.archiveCategoryId, {
+              lockPermissions: false,
+            });
+            await channel.permissionOverwrites.set([
+              { id: channel.guild.id, deny: ["ViewChannel", "SendMessages"] },
+              {
+                id: this.initiateRoleId,
+                deny: ["ViewChannel", "SendMessages"],
+              },
+              { id: this.botRoleId, deny: ["ViewChannel", "SendMessages"] },
+              {
+                id: this.client.user.id,
+                allow: ["ViewChannel", "ManageChannels"],
+              },
+            ]);
 
-      const channel = await targetCategory.guild.channels.create({
-        name: customName,
-        parent: targetCategory.id,
-        permissionOverwrites: [
-          { 
-            id: targetCategory.guild.id, 
-            deny: ['ViewChannel'] 
-          }, 
-          { 
-            id: this.initiateRoleId, 
-            deny: ['ViewChannel'] // Initially Hidden
-          },
-          { 
-            id: member.id, 
-            allow: ['ViewChannel', 'SendMessages', 'EmbedLinks', 'AttachFiles', 'ReadMessageHistory', 'ManageMessages', 'ManageChannels'] 
-          },
-          { 
-            id: this.client.user.id, 
-            allow: ['ViewChannel', 'SendMessages', 'ManageChannels'] 
+            // 2. Beautiful Inactivity DM
+            if (user) {
+              const dmEmbed = new EmbedBuilder()
+                .setColor("#FF4742") // Urgent Red
+                .setTitle("🏠 Personal Room Update")
+                .setAuthor({
+                  name: "EPIC-BOTS",
+                  iconURL: channel.guild.iconURL(),
+                })
+                .setDescription(
+                  `Hello **${user.username}**, your personal room has been closed and access has been removed due to **inactivity**.`,
+                )
+                .addFields(
+                  {
+                    name: "📝 Room",
+                    value: `\`${channel.name}\``,
+                    inline: true,
+                  },
+                  {
+                    name: "⏳ Status",
+                    value: `Inactive (Limit Reached)`,
+                    inline: true,
+                  },
+                )
+                .addFields({
+                  name: "📩 Want to return?",
+                  value: `If you become active again and need a room, please visit <#1503339439777124382> to submit a new request.`,
+                })
+                .setFooter({ text: "Automated Guild Management" })
+                .setTimestamp();
+
+              await user.send({ embeds: [dmEmbed] }).catch(() => null);
+            }
+
+            // 3. Send Public Log
+            const logChannel = await this.client.channels
+              .fetch(this.logChannelId)
+              .catch(() => null);
+            if (logChannel) {
+              await logChannel.send({
+                content: `❌ <@${room.userId}> lost their private channel after 7 days of inactivity.\n📩 Write in <#1509133186645495868> if you want a new one when you return.\n🛡️ **Spanac guild** members can contact an admin to automatically receive a new channel again.`,
+              });
+            }
+
+            // 4. Wipe Ownership from Database
+            await PersonalChannel.deleteOne({ userId: room.userId });
+            logger.info(`Removed inactive room for user ${room.userId}`);
           }
-        ]
-      });
-
-      await PersonalChannel.create({
-        userId: member.id,
-        channelId: channel.id
-      });
-
-      // IMPORTANT: Send a message MENTIONING the user so the channel pops up for them!
-      await channel.send(`🏠 Welcome <@${member.id}> to your new room! Your room is currently **Private**.\nUse \`eb room help\` to see how to invite friends or make it public.`);
-
-      return { success: true, channel };
-    } catch (err) {
-      logger.error("Create error:", err.message);
-      return { success: false, message: "Error creating channel." };
-    }
+        } catch (err) {
+          logger.error(`Error during room removal: ${err.message}`);
+        }
+      }
+    }, 3600000); // Check every hour
   }
 }
 

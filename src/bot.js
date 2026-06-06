@@ -83,13 +83,13 @@ class EpicRPGBot {
   loadFeatures() {
     logger.info("📦 Loading features...");
 
-    this.client.features.coinRain = new CoinRainFeature(this.client);
-    logger.debug("✅ CoinRain feature loaded");
+    // this.client.features.coinRain = new CoinRainFeature(this.client);
+    // logger.debug("✅ CoinRain feature loaded");
 
-    this.client.features.lootboxSummoning = new LootboxSummoningFeature(
-      this.client,
-    );
-    logger.debug("✅ LootboxSummoning feature loaded");
+    // this.client.features.lootboxSummoning = new LootboxSummoningFeature(
+    //   this.client,
+    // );
+    // logger.debug("✅ LootboxSummoning feature loaded");
 
     // Add Aman Trumpet Reminder
     this.client.features.amanTrumpetReminder = new AmanCoinMention(this.client);
