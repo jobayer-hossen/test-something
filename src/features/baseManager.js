@@ -8,9 +8,16 @@ class BaseManager {
     this.client = client;
     this.initiateRoleId = "1330560814536589433";
     this.ownerRoleId = "1509634371999502435";
+
+    // YOUR SPECIFIC ROLES
+    this.staff1Id = "1472621955407548416";
+    this.staff2Id = "969999863871832177";
+    this.modId = "1348685917338210315";
     this.botRoleId = "970000054012244008";
+    this.jailRoleId = "1498459449227083916";
+
     this.logChannelId = "1503339439777124382";
-    this.archiveCategoryId = "1329960246759915632"; // We move it here but don't call it "Archive" in text
+    this.archiveCategoryId = "1329960246759915632";
 
     this.startInactivityChecker();
   }
