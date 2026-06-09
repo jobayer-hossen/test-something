@@ -6,6 +6,7 @@ module.exports = {
   description: "Elite Personal Room Management",
   async execute(message, args, client) {
     const subCommand = args[0]?.toLowerCase();
+    const fullCommand = args.join(" ").toLowerCase();
     const manager = client.features.baseManager;
 
     const ROLES = {
@@ -125,6 +126,8 @@ module.exports = {
               ManageMessages: true,
               EmbedLinks: true,
               ReadMessageHistory: true,
+              AttachFiles: true,
+              PinMessages: true,
             })
             .catch(() => null);
         }
@@ -322,6 +325,8 @@ module.exports = {
                 PermissionFlagsBits.EmbedLinks,
                 PermissionFlagsBits.ReadMessageHistory,
                 PermissionFlagsBits.AttachFiles,
+                PermissionFlagsBits.ManageMessages,
+                PermissionFlagsBits.PinMessages,
               ],
           deny: isJailed
             ? [
@@ -442,6 +447,111 @@ module.exports = {
         .setFooter({ text: `Revoked by ${message.author.username}` });
 
       return message.channel.send({ embeds: [revokeEmbed] });
+    }
+
+    // ==========================================
+    // STAFF TOOLS - Fix All Room Permissions
+    // ==========================================
+    if (subCommand === "fixall" || fullCommand === "fix all permissions") {
+      if (!message.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+        return message.channel.send({
+          embeds: [errorEmbed("❌ You need **Manage Channels** permission.")],
+        });
+      }
+
+      const processingMsg = await message.channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#f39c12")
+            .setTitle("⚙️ Fixing Permissions...")
+            .setDescription("Please wait, updating all rooms and friends..."),
+        ],
+      });
+
+      const allRooms = await PersonalChannel.find({});
+      let fixedRooms = 0;
+      let fixedFriends = 0;
+      let failedRooms = 0;
+
+      for (const room of allRooms) {
+        const channel = await client.channels
+          .fetch(room.channelId)
+          .catch(() => null);
+
+        if (!channel) {
+          failedRooms++;
+          continue;
+        }
+
+        const ownerMember = await message.guild.members
+          .fetch(room.userId)
+          .catch(() => null);
+        const isJailed = ownerMember?.roles.cache.has(ROLES.JAIL);
+
+        // ✅ Fix owner permissions
+        await channel.permissionOverwrites
+          .edit(room.userId, {
+            ViewChannel: isJailed ? false : true,
+            SendMessages: isJailed ? false : true,
+            ManageMessages: isJailed ? false : true,
+            EmbedLinks: isJailed ? false : true,
+            ReadMessageHistory: true,
+            AttachFiles: isJailed ? false : true,
+            PinMessages: isJailed ? false : true, // ✅ Owner gets pin
+          })
+          .catch(() => null);
+
+        // ✅ Fix all friends permissions
+        if (room.friends && room.friends.length > 0) {
+          for (const friendId of room.friends) {
+            await channel.permissionOverwrites
+              .edit(friendId, {
+                ViewChannel: true,
+                SendMessages: true,
+                EmbedLinks: true,
+                ReadMessageHistory: true,
+                AttachFiles: true,
+                PinMessages: true, // ✅ Friends get pin too
+              })
+              .catch(() => null);
+            fixedFriends++;
+          }
+        }
+
+        fixedRooms++;
+      }
+
+      return processingMsg.edit({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#2ecc71")
+            .setTitle("✅ Permissions Fixed!")
+            .addFields(
+              {
+                name: "🏠 Rooms Fixed",
+                value: `${fixedRooms}`,
+                inline: true,
+              },
+              {
+                name: "👥 Friends Updated",
+                value: `${fixedFriends}`,
+                inline: true,
+              },
+              {
+                name: "❌ Failed (Channel Deleted)",
+                value: `${failedRooms}`,
+                inline: true,
+              },
+              {
+                name: "📌 What was fixed",
+                value:
+                  "All room owners and friends now have **Pin Messages** permission.",
+                inline: false,
+              },
+            )
+            .setFooter({ text: `Fixed by ${message.author.username}` }),
+        ],
+      });
     }
 
     // ==========================================
@@ -654,6 +764,7 @@ module.exports = {
         SendMessages: true,
         EmbedLinks: true,
         ReadMessageHistory: true,
+        PinMessages: true,
       });
 
       return message.channel.send({
