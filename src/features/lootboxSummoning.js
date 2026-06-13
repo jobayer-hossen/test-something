@@ -4,58 +4,47 @@ const logger = new Logger("LootboxSummoning");
 class LootboxSummoningFeature {
   constructor(client) {
     this.client = client;
+    this.roleId = "1470272874161111061";
+    // Pre-compile regex for faster matching
+    this.lootboxRegex = /LOOTBOX\s+SUMMONING\s+HAS\s+STARTED/i;
   }
 
   async handleMessage(message) {
     try {
+      // Early returns (fastest checks first)
       if (!message.inGuild()) return;
       if (message.author.id !== "555955826880413696") return;
       if (!message.embeds?.length) return;
 
       const embed = message.embeds[0];
-
       let found = false;
 
-      // ✅ Check title first
-      if (embed.title) {
-        const normalizedTitle = embed.title
-          .toUpperCase()
-          .replace(/[^A-Z ]/g, "")
-          .trim();
-
-        if (normalizedTitle.includes("LOOTBOX SUMMONING HAS STARTED")) {
-          found = true;
-        }
+      // ⚡ Check title with pre-compiled regex (faster)
+      if (embed.title && this.lootboxRegex.test(embed.title)) {
+        found = true;
       }
 
-      // ✅ If not found in title, check fields
+      // ⚡ Check fields if not found in title
       if (!found && embed.fields?.length) {
-        found = embed.fields.some((field) => {
-          if (!field.name) return false;
-
-          const normalizedField = field.name
-            .toUpperCase()
-            .replace(/[^A-Z ]/g, "")
-            .trim();
-
-          return normalizedField.includes("LOOTBOX SUMMONING HAS STARTED");
-        });
+        found = embed.fields.some((field) =>
+          field.name && this.lootboxRegex.test(field.name)
+        );
       }
 
       if (!found) return;
 
-      const roleId = "1470272874161111061";
-
+      // 🚀 Send without awaiting the delete (fire and forget)
       const sent = await message.channel.send({
-        content: `<@&${roleId}> If you want EDGY! then type **SUMMON**!`,
+        content: `<@&${this.roleId}> If you want EDGY! then type **SUMMON**!`,
         allowedMentions: { parse: ["roles"] },
       });
 
+      // Don't wait for deletion - do it in background
       setTimeout(() => {
         sent.delete().catch(() => {});
       }, 60000);
 
-      console.log("✅ Lootbox triggered");
+      // console.log("✅ Lootbox triggered");
     } catch (err) {
       logger.error("Lootbox error:", err);
     }
