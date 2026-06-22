@@ -7,7 +7,7 @@ const config = require("./config");
 const database = require("./database/connection");
 const CoinRainFeature = require("./features/coinRain");
 const LootboxSummoningFeature = require("./features/lootboxSummoning");
-const AmanCoinMention = require("./features/amanTrumpetReminder"); // Add this
+const AmanCoinMention = require("./features/amanTrumpetReminder");
 const BaseManager = require("./features/baseManager");
 
 // Keep bot alive on Render
@@ -16,9 +16,15 @@ http
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.write("I'm alive - " + new Date().toISOString());
     res.end();
-    console.log("🏓 Ping received from UptimeRobot:", new Date().toISOString());
   })
-  .listen(process.env.PORT || 3000);
+  .listen(process.env.PORT || 3000, () => {
+    console.log("🟢 HTTP server running on port " + (process.env.PORT || 3000));
+  });
+
+// Auto-ping to keep Render alive
+setInterval(() => {
+  console.log("💓 Keep-alive check: " + new Date().toISOString());
+}, 14 * 60 * 1000);
 
 const logger = new Logger("Bot");
 
@@ -33,6 +39,7 @@ class EpicRPGBot {
         GatewayIntentBits.GuildPresences,
         GatewayIntentBits.GuildMembers,
       ],
+      rest: { timeout: 60000, retries: 5 },
     });
 
     this.client.commands = new Collection();
@@ -43,7 +50,7 @@ class EpicRPGBot {
     try {
       logger.info("🚀 Initializing Epic RPG Bot...");
 
-      // ✅ ADD THIS - catch ALL errors
+      // Catch ALL errors
       process.on("unhandledRejection", (error) => {
         console.error("❌ UNHANDLED REJECTION:", error.message);
         console.error("Code:", error.code);
@@ -84,10 +91,63 @@ class EpicRPGBot {
       await this.loadCommands();
       await this.loadEvents();
 
+      // ================= GATEWAY DEBUG LISTENERS =================
+      this.client.on("debug", (info) => {
+        if (
+          info.includes("Connecting") ||
+          info.includes("READY") ||
+          info.includes("SESSION") ||
+          info.includes("disconnect") ||
+          info.includes("WebSocket") ||
+          info.includes("Gateway") ||
+          info.includes("401") ||
+          info.includes("4004") ||
+          info.includes("4000")
+        ) {
+          console.log("🔧 GATEWAY:", info);
+        }
+      });
+
+      this.client.on("shardReady", (id) => {
+        console.log(`✅ SHARD ${id} READY!`);
+      });
+
+      this.client.on("shardError", (error, shardId) => {
+        console.error(`❌ SHARD ${shardId} ERROR:`, error.message);
+      });
+
+      this.client.on("shardDisconnect", (event, shardId) => {
+        console.error(`❌ SHARD ${shardId} DISCONNECTED:`, event.code, event.reason);
+      });
+
+      this.client.on("invalidated", () => {
+        console.error("❌ SESSION INVALIDATED - Token might be banned/invalid!");
+        process.exit(1);
+      });
+      // ===========================================================
+
       // Login
       console.log("🔑 Attempting Discord login...");
       await this.client.login(config.discord.token);
-      console.log("✅ Discord login successful!");
+      console.log("✅ Discord login successful! Waiting for READY event...");
+
+      // Force Restart if Ready never fires
+      const readyTimeout = setTimeout(() => {
+        console.error("❌ READY EVENT NEVER FIRED IN 60 SECONDS!");
+        console.error("❌ Discord Gateway not responding - Restarting process...");
+        process.exit(1); // Render will auto-restart this
+      }, 60000);
+
+      this.client.once("clientReady", () => {
+        clearTimeout(readyTimeout);
+        console.log("✅ READY EVENT CONFIRMED FIRED! (clientReady)");
+      });
+
+      this.client.once("ready", () => {
+        clearTimeout(readyTimeout);
+        console.log("✅ READY EVENT CONFIRMED FIRED! (ready)");
+      });
+
     } catch (error) {
       console.error("❌ FATAL ERROR:", error.message);
       console.error("Stack:", error.stack);
@@ -101,18 +161,14 @@ class EpicRPGBot {
     this.client.features.coinRain = new CoinRainFeature(this.client);
     logger.debug("✅ CoinRain feature loaded");
 
-    this.client.features.lootboxSummoning = new LootboxSummoningFeature(
-      this.client,
-    );
+    this.client.features.lootboxSummoning = new LootboxSummoningFeature(this.client);
     logger.debug("✅ LootboxSummoning feature loaded");
 
-    // Add Aman Trumpet Reminder
     this.client.features.amanTrumpetReminder = new AmanCoinMention(this.client);
     logger.debug("✅ Aman Trumpet Reminder feature loaded");
 
     logger.info("✅ All features loaded successfully");
 
-    // Add RPG Base Manager feature
     this.client.features.baseManager = new BaseManager(this.client);
     logger.debug("✅ Base Manager feature loaded");
   }
