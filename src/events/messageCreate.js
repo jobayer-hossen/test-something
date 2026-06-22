@@ -9,11 +9,13 @@ module.exports = {
   async execute(message, client) {
     try {
       // ========== CRITICAL CHECKS (DO THESE FIRST) ==========
-      console.log(`📩 [MSG] ${message.author.tag}: ${message.content.substring(0, 50)}`); // DEBUG
-      
+      // console.log(
+      //   `📩 [MSG] ${message.author.tag}: ${message.content.substring(0, 50)}`,
+      // ); // DEBUG
+
       if (message.author.bot) return; // ← FIX: Ignore ALL bots
       if (!message.guild) return; // Ignore DMs
-      
+
       // ========== TRACK USER ACTIVITY ==========
       try {
         await userService.getOrCreateUser(
@@ -27,7 +29,7 @@ module.exports = {
         await PersonalChannel.findOneAndUpdate(
           { channelId: message.channel.id },
           { lastActivity: new Date() },
-          { returnDocument: 'after' } // ← FIX: Mongoose deprecation warning
+          { returnDocument: "after" }, // ← FIX: Mongoose deprecation warning
         ).catch(() => null);
       } catch (error) {
         logger.debug("Error tracking user:", error.message);
@@ -51,9 +53,12 @@ module.exports = {
           try {
             await command.execute(message, args, client);
           } catch (error) {
-            logger.error(`Error executing command ${commandName}:`, error.message);
+            logger.error(
+              `Error executing command ${commandName}:`,
+              error.message,
+            );
             await message.channel.send(
-              "❌ An error occurred while executing this command!"
+              "❌ An error occurred while executing this command!",
             );
           }
         } else {
@@ -66,8 +71,7 @@ module.exports = {
         // Owner mentions
         const ownerID = "782630678389981244";
         const isDirectMention =
-          message.mentions.users.has(ownerID) &&
-          message.reference === null;
+          message.mentions.users.has(ownerID) && !message.reference;
 
         const containsIdLiteral =
           message.content.includes(`<@${ownerID}>`) ||
@@ -88,7 +92,8 @@ module.exports = {
             "https://cdn.discordapp.com/emojis/1469534191136936107.webp?size=96",
             "https://media.discordapp.net/stickers/1476422766755315855.webp?size=160&quality=lossless",
           ];
-          const randomSticker = stickers[Math.floor(Math.random() * stickers.length)];
+          const randomSticker =
+            stickers[Math.floor(Math.random() * stickers.length)];
 
           await message.channel.send({
             content: randomSticker,

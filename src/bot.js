@@ -13,8 +13,10 @@ const BaseManager = require("./features/baseManager");
 // Keep bot alive on Render
 http
   .createServer((req, res) => {
-    res.write("I'm alive");
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.write("I'm alive - " + new Date().toISOString());
     res.end();
+    console.log("🏓 Ping received from UptimeRobot:", new Date().toISOString());
   })
   .listen(process.env.PORT || 3000);
 
@@ -41,41 +43,54 @@ class EpicRPGBot {
     try {
       logger.info("🚀 Initializing Epic RPG Bot...");
 
-      // Connect to database
+      // ✅ ADD THIS - catch ALL errors
+      process.on("unhandledRejection", (error) => {
+        console.error("❌ UNHANDLED REJECTION:", error.message);
+        console.error("Code:", error.code);
+        console.error("Stack:", error.stack);
+      });
+
+      process.on("uncaughtException", (error) => {
+        console.error("❌ UNCAUGHT EXCEPTION:", error.message);
+        console.error("Stack:", error.stack);
+      });
+
+      // Check env variables first
+      console.log("=== ENV CHECK ===");
+      console.log("DISCORD_TOKEN exists:", !!process.env.DISCORD_TOKEN);
+      console.log("MONGODB_URI exists:", !!process.env.MONGODB_URI);
+      console.log("CLIENT_ID exists:", !!process.env.CLIENT_ID);
+      console.log("================");
+
+      // Connect database
       try {
         logger.info("🔌 Connecting to MongoDB...");
         const dbConnected = await database.connect();
 
         if (dbConnected) {
-          logger.info("✅ Database connected successfully!");
+          logger.info("✅ Database connected!");
           this.client.db = true;
         } else {
-          logger.warn(
-            "⚠️ Bot running without database - Check MONGODB_URI in .env",
-          );
+          logger.warn("⚠️ No database - some features may not work!");
           this.client.db = false;
         }
       } catch (dbError) {
-        logger.error("Database connection error:", dbError.message);
-        logger.warn("⚠️ Continuing without database...");
+        console.error("❌ DB Error:", dbError.message);
         this.client.db = false;
       }
 
-      // Load features
+      // Load everything
       this.loadFeatures();
-
-      // Load commands
       await this.loadCommands();
-
-      // Load events
       await this.loadEvents();
 
-      // Login to Discord
+      // Login
+      console.log("🔑 Attempting Discord login...");
       await this.client.login(config.discord.token);
-
-      logger.info("✅ Bot initialization complete!");
+      console.log("✅ Discord login successful!");
     } catch (error) {
-      logger.error("Fatal error during initialization:", error.message);
+      console.error("❌ FATAL ERROR:", error.message);
+      console.error("Stack:", error.stack);
       process.exit(1);
     }
   }
