@@ -1,5 +1,5 @@
 const Logger = require('../logger');
-const AmanCoinMention = require('../database/schemas/AmanCoinMention'); // Assuming this is the correct model for tracking RPG trumpet usage
+const AmanCoinMention = require('../database/schemas/AmanCoinMention');
 
 const logger = new Logger('AmanTrumpetReminder');
 
@@ -56,7 +56,10 @@ class AmanTrumpetReminder {
             reminderSent: false,
             missedCount: 0 // Reset missed count when they use it
           },
-          { upsert: true, new: true }
+          { 
+            upsert: true, 
+            returnDocument: 'after' // ← FIXED: Changed from 'new: true'
+          }
         );
 
         logger.debug(`✅ Tracked RPG trumpet usage for user ${userId}`);
@@ -128,7 +131,8 @@ class AmanTrumpetReminder {
         {
           reminderSent: true,
           missedCount: newMissedCount
-        }
+        },
+        { returnDocument: 'after' } // ← FIXED: Changed from 'new: true'
       );
 
       logger.info(`📨 Sent reminder to user ${TARGET_USER_ID} (missed: ${newMissedCount})`);

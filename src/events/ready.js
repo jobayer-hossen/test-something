@@ -49,8 +49,10 @@ module.exports = {
           status: 'online',
         });
 
-        logger.info(`🎭 Status changed: ${randomActivity.type === 0 ? '🎮 Playing' : '👀 Watching'} ${randomActivity.name}`);
-      }, 20000);
+        // logger.info(`🎭 Status changed: ${randomActivity.type === 0 ? '🎮 Playing' : '👀 Watching'} ${randomActivity.name}`);
+      },
+      
+      20000);
 
       logger.info('✅ Status rotation started with animated emojis!');
 

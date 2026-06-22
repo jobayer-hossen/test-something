@@ -32,11 +32,11 @@ class ServerService {
    */
   async setCoinRainRole(serverId, roleId) {
     try {
-      // FIXED: returnDocument: 'after'
+      // ✅ FIXED: Added upsert + returnDocument
       const settings = await ServerSettings.findOneAndUpdate(
         { serverId },
         { coinRainRoleId: roleId },
-        { returnDocument: 'after' }
+        { upsert: true, returnDocument: 'after' }
       );
 
       return settings;
@@ -51,11 +51,11 @@ class ServerService {
    */
   async setLootboxRole(serverId, roleId) {
     try {
-      // FIXED: returnDocument: 'after'
+      // ✅ FIXED: Added upsert + returnDocument
       const settings = await ServerSettings.findOneAndUpdate(
         { serverId },
         { lootboxRoleId: roleId },
-        { returnDocument: 'after' }
+        { upsert: true, returnDocument: 'after' }
       );
 
       return settings;

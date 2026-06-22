@@ -264,7 +264,7 @@ module.exports = {
           friends: [],
           createdAt: new Date(),
         },
-        { upsert: true },
+        { upsert: true, returnDocument: "after" },
       );
 
       await target.roles.add(ROLES.OWNER).catch(() => null);
@@ -602,6 +602,7 @@ module.exports = {
       await PersonalChannel.findOneAndUpdate(
         { channelId: message.channel.id },
         { lastActivity: new Date() },
+        { returnDocument: "after" },
       );
     }
 
@@ -756,6 +757,7 @@ module.exports = {
       await PersonalChannel.findOneAndUpdate(
         { channelId: message.channel.id },
         { $addToSet: { friends: friend.id } },
+         { returnDocument: 'after' }
       );
 
       // Set channel permissions
@@ -813,6 +815,7 @@ module.exports = {
       await PersonalChannel.findOneAndUpdate(
         { channelId: message.channel.id },
         { $pull: { friends: friend.id } },
+         { returnDocument: 'after' }
       );
 
       // Remove channel permissions
