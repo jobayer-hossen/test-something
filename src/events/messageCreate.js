@@ -1,6 +1,6 @@
 const Logger = require("../logger");
 const userService = require("../database/services/userService");
-const PersonalChannel = require("../database/schemas/PersonalChannel");
+const PersonalChannel = require("../database/schemas/PersonalChannel"); // Add this
 
 const logger = new Logger("MessageCreate");
 
@@ -8,37 +8,35 @@ module.exports = {
   name: "messageCreate",
   async execute(message, client) {
     try {
-      // ========== CRITICAL CHECKS (DO THESE FIRST) ==========
-      // console.log(
-      //   `📩 [MSG] ${message.author.tag}: ${message.content.substring(0, 50)}`,
-      // ); // DEBUG
+      if (!message.guild) return;
+      if (message.author.id === client.user.id) return;
 
-      if (message.author.bot) return; // ← FIX: Ignore ALL bots
-      if (!message.guild) return; // Ignore DMs
+      // Track user activity (XP)
+      if (!message.author.bot) {
+        try {
+          await userService.getOrCreateUser(
+            message.author.id,
+            message.author.username,
+            message.author.bot,
+          );
+          await userService.addXP(message.author.id, 1);
 
-      // ========== TRACK USER ACTIVITY ==========
-      try {
-        await userService.getOrCreateUser(
-          message.author.id,
-          message.author.username,
-          message.author.bot,
-        );
-        await userService.addXP(message.author.id, 1);
-
-        // Track room activity
-        await PersonalChannel.findOneAndUpdate(
-          { channelId: message.channel.id },
-          { lastActivity: new Date() },
-          { returnDocument: "after" }, // ← FIX: Mongoose deprecation warning
-        ).catch(() => null);
-      } catch (error) {
-        logger.debug("Error tracking user:", error.message);
+          // --- ADDED: TRACK ROOM ACTIVITY ---
+          // This updates the 'lastActivity' date so the room doesn't get archived
+          await PersonalChannel.findOneAndUpdate(
+            { channelId: message.channel.id },
+            { lastActivity: new Date() },
+          ).catch(() => null);
+          // ----------------------------------
+        } catch (error) {
+          logger.debug("Error tracking user:", error.message);
+        }
       }
 
-      // ========== HANDLE COMMANDS ==========
       const prefix = "eb";
       const lowerContent = message.content.toLowerCase();
 
+      // Handle prefix commands
       if (lowerContent.startsWith(prefix + " ")) {
         const args = message.content
           .slice(prefix.length + 1)
@@ -49,7 +47,6 @@ module.exports = {
         const command = client.commands.get(commandName);
 
         if (command) {
-          console.log(`⚡ Executing command: ${commandName}`); // DEBUG
           try {
             await command.execute(message, args, client);
           } catch (error) {
@@ -61,17 +58,16 @@ module.exports = {
               "❌ An error occurred while executing this command!",
             );
           }
-        } else {
-          console.log(`❓ Command not found: ${commandName}`); // DEBUG
         }
       }
 
-      // ========== HANDLE FEATURES ==========
       try {
-        // Owner mentions
+        // Handle owner mentions
         const ownerID = "782630678389981244";
         const isDirectMention =
-          message.mentions.users.has(ownerID) && !message.reference;
+          message.mentions.users.has(ownerID) &&
+          message.reference === null &&
+          !message.author.bot;
 
         const containsIdLiteral =
           message.content.includes(`<@${ownerID}>`) ||
@@ -122,7 +118,6 @@ module.exports = {
       }
     } catch (error) {
       logger.error("Critical error in messageCreate:", error.message);
-      console.error(error); // Full stack trace
     }
   },
 };
