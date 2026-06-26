@@ -12,6 +12,7 @@ const CoinRainFeature = require("./features/coinRain");
 const LootboxSummoningFeature = require("./features/lootboxSummoning");
 const AmanCoinMention = require("./features/amanTrumpetReminder");
 const BaseManager = require("./features/baseManager");
+const TournamentManager = require("./features/tournamentManager");
 
 const logger = new Logger("Bot");
 
@@ -27,11 +28,16 @@ keepAliveServer.listen(process.env.PORT || 3000, () => {
 
 // ✅ FIX: Self-Ping to prevent Render sleep
 if (process.env.RENDER_EXTERNAL_URL) {
-  setInterval(() => {
-    https.get(process.env.RENDER_EXTERNAL_URL, (res) => {
-      console.log('🏓 Ping Status:', res.statusCode);
-    }).on('error', (err) => {});
-  }, 10 * 60 * 1000); // Every 10 minutes
+  setInterval(
+    () => {
+      https
+        .get(process.env.RENDER_EXTERNAL_URL, (res) => {
+          console.log("🏓 Ping Status:", res.statusCode);
+        })
+        .on("error", (err) => {});
+    },
+    10 * 60 * 1000,
+  ); // Every 10 minutes
 }
 
 class EpicRPGBot {
@@ -86,7 +92,7 @@ class EpicRPGBot {
 
       // ✅ LOGIN WITH ERROR HANDLING AND TIMEOUT
       console.log("🔑 Attempting Discord login...");
-      
+
       // Add login error catcher
       try {
         await this.client.login(cleanToken); // Use cleanToken, not config.discord.token
@@ -94,8 +100,10 @@ class EpicRPGBot {
       } catch (loginError) {
         console.error("❌ LOGIN FAILED:", loginError.message);
         console.error("Error code:", loginError.code);
-        if (loginError.code === 'TokenInvalid') {
-          console.error("❌ Token is invalid! Check DISCORD_TOKEN in Render env variables");
+        if (loginError.code === "TokenInvalid") {
+          console.error(
+            "❌ Token is invalid! Check DISCORD_TOKEN in Render env variables",
+          );
         }
         process.exit(1);
       }
@@ -103,7 +111,9 @@ class EpicRPGBot {
       // Wait for ready event with timeout
       const readyTimeout = setTimeout(() => {
         console.error("❌ READY EVENT NEVER FIRED IN 60 SECONDS!");
-        console.error("❌ Check if event name is 'ready' (not 'clientReady') for discord.js v14");
+        console.error(
+          "❌ Check if event name is 'ready' (not 'clientReady') for discord.js v14",
+        );
         process.exit(1);
       }, 60000);
 
@@ -112,7 +122,6 @@ class EpicRPGBot {
         clearTimeout(readyTimeout);
         console.log("✅ READY EVENT CONFIRMED FIRED! Bot is online!");
       });
-      
     } catch (error) {
       console.error("❌ FATAL ERROR:", error.message);
       console.error(error.stack);
@@ -151,16 +160,20 @@ class EpicRPGBot {
   loadFeatures() {
     logger.info("📦 Loading Features...");
     this.client.features.coinRain = new CoinRainFeature(this.client);
-    this.client.features.lootboxSummoning = new LootboxSummoningFeature(this.client);
+    this.client.features.lootboxSummoning = new LootboxSummoningFeature(
+      this.client,
+    );
     this.client.features.amanTrumpetReminder = new AmanCoinMention(this.client);
     this.client.features.baseManager = new BaseManager(this.client);
+    this.client.features.tournamentManager = new TournamentManager(this.client);
+
     logger.info("✅ Features loaded");
   }
 
   async loadCommands() {
     const commandsPath = path.join(__dirname, "commands");
     const commandFiles = await fs.readdir(commandsPath);
-    const jsFiles = commandFiles.filter(f => f.endsWith(".js"));
+    const jsFiles = commandFiles.filter((f) => f.endsWith(".js"));
 
     for (const file of jsFiles) {
       const command = require(path.join(commandsPath, file));
@@ -174,14 +187,18 @@ class EpicRPGBot {
   async loadEvents() {
     const eventsPath = path.join(__dirname, "events");
     const eventFiles = await fs.readdir(eventsPath);
-    const jsFiles = eventFiles.filter(f => f.endsWith(".js"));
+    const jsFiles = eventFiles.filter((f) => f.endsWith(".js"));
 
     for (const file of jsFiles) {
       const event = require(path.join(eventsPath, file));
       if (event.once) {
-        this.client.once(event.name, (...args) => event.execute(...args, this.client));
+        this.client.once(event.name, (...args) =>
+          event.execute(...args, this.client),
+        );
       } else {
-        this.client.on(event.name, (...args) => event.execute(...args, this.client));
+        this.client.on(event.name, (...args) =>
+          event.execute(...args, this.client),
+        );
       }
     }
     logger.info("✅ Events loaded");

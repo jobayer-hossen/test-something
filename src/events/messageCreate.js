@@ -113,6 +113,10 @@ module.exports = {
         if (client.features?.lootboxSummoning) {
           client.features.lootboxSummoning.handleMessage(message);
         }
+
+        if (client.features?.tournamentManager) {
+          await client.features.tournamentManager.handleJoinWord(message);
+        }
       } catch (error) {
         logger.error("Error processing message triggers:", error.message);
       }

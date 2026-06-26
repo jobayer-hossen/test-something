@@ -1,4 +1,5 @@
-const User = require('../schemas/User'); // Ensure this path matches your User model
+// src/database/services/userService.js
+const User = require('../schemas/User');
 const Logger = require('../../logger');
 const logger = new Logger('UserService');
 

@@ -1,98 +1,62 @@
+const economyService = require('../database/services/economyService');
+const Badge = require('../database/schemas/Badge');
 const { EmbedBuilder } = require('discord.js');
-const Logger = require('../logger');
-const userService = require('../database/services/userService');
-
-const logger = new Logger('LeaderboardCommand');
 
 module.exports = {
   name: 'leaderboard',
-  description: 'View top players leaderboard',
+  description: 'View top players',
 
   async execute(message, args, client) {
-    try {
-      // Get sort type from args (coins, xp, commandsUsed, level)
-      const sortBy = args[0]?.toLowerCase() || 'coins';
-      const validSortTypes = ['coins', 'xp', 'commandsused', 'level', 'commands'];
+    const type = args[0]?.toLowerCase() || 'gold';
 
-      // Map command to database field
-      let sortField = 'coins';
-      if (sortBy === 'xp') sortField = 'xp';
-      if (sortBy === 'commands' || sortBy === 'commandsused') sortField = 'commandsUsed';
-      if (sortBy === 'level') sortField = 'level';
-
-      // Get top 10 users
-      const topUsers = await userService.getTopUsers(10, sortField);
-
-      if (!topUsers || topUsers.length === 0) {
-        return await message.channel.send('❌ No users found in database!');
-      }
-
-      // Build leaderboard string
-      let leaderboardText = '';
-      const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
-
-      topUsers.forEach((user, index) => {
-        const medal = medals[index];
-        const value = this.formatValue(user[sortField], sortField);
-        leaderboardText += `${medal} **${user.username}** - ${value}\n`;
-      });
-
-      // Create leaderboard embed
-      const embed = new EmbedBuilder()
-        .setColor('#FFD700')
-        .setTitle(`🏆 Leaderboard - Top 10 by ${this.getSortLabel(sortField)}`)
-        .setDescription(leaderboardText)
-        .addFields(
-          {
-            name: '📊 Available Sorts',
-            value: '`eb leaderboard coins` - By coins\n`eb leaderboard xp` - By XP\n`eb leaderboard level` - By level\n`eb leaderboard commands` - By commands used',
-            inline: false,
-          }
-        )
-        .setTimestamp()
-        .setFooter({
-          text: 'Epic Bot | Leaderboard System',
-          iconURL: client.user.avatarURL(),
-        });
-
-      await message.channel.send({ embeds: [embed] });
-
-      logger.info(`Leaderboard viewed (sorted by ${sortField})`);
-    } catch (error) {
-      logger.error('Error in leaderboard command:', error.message);
-      await message.channel.send('❌ An error occurred!');
+    if (type === 'badges') {
+      return this.showBadgeLeaderboard(message);
     }
+
+    return this.showGoldLeaderboard(message);
   },
 
-  /**
-   * Format value based on type
-   */
-  formatValue(value, type) {
-    if (type === 'coins') {
-      return `💰 ${value.toLocaleString()} coins`;
-    }
-    if (type === 'xp') {
-      return `📈 ${value} XP`;
-    }
-    if (type === 'commandsUsed') {
-      return `⌨️ ${value} commands`;
-    }
-    if (type === 'level') {
-      return `⭐ Level ${value}`;
-    }
-    return value;
+  async showGoldLeaderboard(message) {
+    const users = await economyService.getLeaderboard(10);
+
+    const medals = ['🥇', '🥈', '🥉'];
+    const lines = users.map((u, i) => {
+      const medal = medals[i] || `**${i + 1}.**`;
+      return `${medal} **${u.username}** — ${u.coins.toLocaleString()} 💰`;
+    });
+
+    const embed = new EmbedBuilder()
+      .setColor('#FFD700')
+      .setTitle('🏆 Gold Leaderboard')
+      .setDescription(lines.join('\n') || 'No data yet!')
+      .setFooter({ text: 'eb leaderboard badges — View badge rankings' })
+      .setTimestamp();
+
+    message.channel.send({ embeds: [embed] });
   },
 
-  /**
-   * Get sort label
-   */
-  getSortLabel(sortField) {
-    const labels = {
-      coins: 'Coins 💰',
-      xp: 'XP 📈',
-      commandsUsed: 'Commands ⌨️',
-      level: 'Level ⭐',
-    };
-    return labels[sortField] || 'Coins';
+  async showBadgeLeaderboard(message) {
+    const masters = await Badge.find({ isTournamentMaster: true }).limit(5);
+    const topWinners = await Badge.find({}).sort({ tournamentsWon: -1 }).limit(10);
+
+    const masterLines =
+      masters.length > 0
+        ? masters.map((b) => `👑 **${b.username}** — ${b.badges.join('')}`).join('\n')
+        : 'No Tournament Masters yet!';
+
+    const winnerLines = topWinners
+      .map((b, i) => `**${i + 1}.** ${b.username} — ${b.tournamentsWon} wins — ${b.badges.join('')}`)
+      .join('\n');
+
+    const embed = new EmbedBuilder()
+      .setColor('#F39C12')
+      .setTitle('🏆 Badge Leaderboard')
+      .addFields(
+        { name: '👑 Tournament Masters', value: masterLines },
+        { name: '🏅 Top Tournament Winners', value: winnerLines || 'None yet!' }
+      )
+      .setTimestamp();
+
+    message.channel.send({ embeds: [embed] });
   },
 };
