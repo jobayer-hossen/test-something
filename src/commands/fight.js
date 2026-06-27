@@ -80,7 +80,7 @@ module.exports = {
       const reasons = {
         no_boss: '❌ Boss disappeared!',
         not_joined: '❌ Use `eb fight` to join the battle first!',
-        not_enough_players: `❌ Need ${10} players to start fighting!`,
+        not_enough_players: `❌ Need ${5} players to start fighting!`,
         defeated: '❌ Boss already defeated!',
       };
 

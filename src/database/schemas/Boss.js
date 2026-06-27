@@ -18,7 +18,7 @@ const bossSchema = new mongoose.Schema({
   spawnedAt: { type: Date, default: Date.now },
   spawnChannelId: String,
   spawnGuildId: String,
-  minPlayers: { type: Number, default: 10 },
+  minPlayers: { type: Number, default: 5 },
   isDefeated: { type: Boolean, default: false },
   defeatMessage: String,
 });
