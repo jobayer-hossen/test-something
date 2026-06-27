@@ -5,7 +5,7 @@ const { EmbedBuilder } = require('discord.js');
 
 // Per-user fight cooldown (30 seconds)
 const fightCooldowns = new Map();
-const FIGHT_COOLDOWN = 30 * 1000;
+const FIGHT_COOLDOWN = 30 * 100;
 
 module.exports = {
   name: 'fight',
@@ -23,7 +23,7 @@ module.exports = {
     if (lastFight) {
       const remaining = FIGHT_COOLDOWN - (Date.now() - lastFight);
       if (remaining > 0) {
-        const secs = Math.ceil(remaining / 1000);
+        const secs = Math.ceil(remaining / 100);
         const embed = new EmbedBuilder()
           .setColor('#FF6B6B')
           .setTitle('⚔️ Catching Breath...')

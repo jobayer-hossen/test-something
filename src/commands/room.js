@@ -27,6 +27,24 @@ module.exports = {
       new EmbedBuilder().setColor("#5865F2").setDescription(text);
 
     // ==========================================
+    // HELPER - Resolve user by mention OR raw ID
+    // Works even if user left the server
+    // ==========================================
+    const resolveUser = async (arg) => {
+      if (!arg) return null;
+
+      // Extract ID from mention format <@123456> or <@!123456> or raw 123456
+      const id = arg.replace(/^<@!?(\d+)>$/, "$1").trim();
+
+      // Must be a valid snowflake (17-20 digits)
+      if (!/^\d{17,20}$/.test(id)) return null;
+
+      // Try to fetch the user from Discord API (works even if left server)
+      const user = await client.users.fetch(id).catch(() => null);
+      return user || null;
+    };
+
+    // ==========================================
     // HELP COMMAND - Works anywhere
     // ==========================================
     if (!subCommand || subCommand === "help") {
@@ -60,6 +78,7 @@ module.exports = {
             value: [
               "`eb room add @user` - Invite a friend to your room",
               "`eb room remove @user` - Remove a friend from your room",
+              "`eb room remove 123456789` - Remove by ID (if user left server)",
               "`eb room rename new-name` - Change your room's name",
             ].join("\n"),
             inline: false,
@@ -70,6 +89,7 @@ module.exports = {
               "• Management commands only work inside **your own room**",
               "• `eb room info` works anywhere to check room status",
               "• Use `eb room info @user` to check another user's room (Staff only)",
+              "• You can use a **User ID** instead of @mention if someone left the server",
             ].join("\n"),
             inline: false,
           },
@@ -133,9 +153,9 @@ module.exports = {
         }
       }
 
-      // Build friends list from channel permission overwrites
+      // Build friends list from DB
       let friendsList = "No friends added yet";
-      if (roomChannel && data.friends && data.friends.length > 0) {
+      if (data.friends && data.friends.length > 0) {
         const friendMentions = data.friends.map((id) => `<@${id}>`);
         friendsList = friendMentions.join(", ");
       }
@@ -325,7 +345,6 @@ module.exports = {
                 PermissionFlagsBits.EmbedLinks,
                 PermissionFlagsBits.ReadMessageHistory,
                 PermissionFlagsBits.AttachFiles,
-                PermissionFlagsBits.ManageMessages,
                 PermissionFlagsBits.PinMessages,
               ],
           deny: isJailed
@@ -372,6 +391,7 @@ module.exports = {
 
     // ==========================================
     // STAFF TOOLS - Revoke Ownership
+    // Supports @mention AND raw user ID
     // ==========================================
     if (subCommand === "revoke") {
       if (!message.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
@@ -384,22 +404,36 @@ module.exports = {
         });
       }
 
-      const target = message.mentions.members.first();
-      if (!target) {
+      // ✅ Support both @mention and raw ID
+      const rawArg = args[1];
+      if (!rawArg) {
         return message.channel.send({
           embeds: [
             errorEmbed(
-              "❌ Please mention a user to revoke ownership from.\n**Usage:** `eb room revoke @user`",
+              "❌ Please mention a user or provide their ID.\n**Usage:** `eb room revoke @user` or `eb room revoke 123456789`",
             ),
           ],
         });
       }
 
-      const ownerData = await PersonalChannel.findOne({ userId: target.id });
+      const targetUser = await resolveUser(rawArg);
+      if (!targetUser) {
+        return message.channel.send({
+          embeds: [
+            errorEmbed(
+              "❌ Could not find that user. Please provide a valid @mention or User ID.",
+            ),
+          ],
+        });
+      }
+
+      const ownerData = await PersonalChannel.findOne({ userId: targetUser.id });
       if (!ownerData) {
         return message.channel.send({
           embeds: [
-            errorEmbed(`❌ **${target.user.username}** doesn't own any room.`),
+            errorEmbed(
+              `❌ **${targetUser.username}** (ID: \`${targetUser.id}\`) doesn't own any room.`,
+            ),
           ],
         });
       }
@@ -408,16 +442,22 @@ module.exports = {
         .fetch(ownerData.channelId)
         .catch(() => null);
 
-      // Remove ownership from database but keep friends (channel stays)
-      await PersonalChannel.deleteOne({ userId: target.id });
+      // Remove ownership from database
+      await PersonalChannel.deleteOne({ userId: targetUser.id });
 
-      // Remove owner role
-      await target.roles.remove(ROLES.OWNER).catch(() => null);
+      // Try to remove owner role (only works if still in server)
+      const targetMember = await message.guild.members
+        .fetch(targetUser.id)
+        .catch(() => null);
 
-      // Reset channel permissions for the previous owner (allow them to talk as normal member)
+      if (targetMember) {
+        await targetMember.roles.remove(ROLES.OWNER).catch(() => null);
+      }
+
+      // Reset channel permissions for the previous owner
       if (roomChannel) {
         await roomChannel.permissionOverwrites
-          .delete(target.id)
+          .delete(targetUser.id)
           .catch(() => null);
       }
 
@@ -427,20 +467,27 @@ module.exports = {
         .addFields(
           {
             name: "👤 Previous Owner",
-            value: `<@${target.id}> (${target.user.username})`,
+            // Show username if available, fallback to ID tag
+            value: `<@${targetUser.id}> (${targetUser.username ?? "Unknown User"})`,
+            inline: true,
+          },
+          {
+            name: "🆔 User ID",
+            value: `\`${targetUser.id}\``,
             inline: true,
           },
           {
             name: "🏠 Channel",
             value: roomChannel
               ? `<#${ownerData.channelId}>`
-              : "Channel not found",
-            inline: true,
+              : "⚠️ Channel not found (already deleted)",
+            inline: false,
           },
           {
             name: "ℹ️ Note",
-            value:
-              "The previous owner can still view and send messages as a regular member. The channel permissions have been reset.",
+            value: targetMember
+              ? "The previous owner can still view and send messages as a regular member. Channel permissions have been reset."
+              : "The user has left the server. Their channel permissions and ownership have been cleared.",
             inline: false,
           },
         )
@@ -488,7 +535,6 @@ module.exports = {
           .catch(() => null);
         const isJailed = ownerMember?.roles.cache.has(ROLES.JAIL);
 
-        // ✅ Fix owner permissions
         await channel.permissionOverwrites
           .edit(room.userId, {
             ViewChannel: isJailed ? false : true,
@@ -497,11 +543,10 @@ module.exports = {
             EmbedLinks: isJailed ? false : true,
             ReadMessageHistory: true,
             AttachFiles: isJailed ? false : true,
-            PinMessages: isJailed ? false : true, // ✅ Owner gets pin
+            PinMessages: isJailed ? false : true,
           })
           .catch(() => null);
 
-        // ✅ Fix all friends permissions
         if (room.friends && room.friends.length > 0) {
           for (const friendId of room.friends) {
             await channel.permissionOverwrites
@@ -511,7 +556,7 @@ module.exports = {
                 EmbedLinks: true,
                 ReadMessageHistory: true,
                 AttachFiles: true,
-                PinMessages: true, // ✅ Friends get pin too
+                PinMessages: true,
               })
               .catch(() => null);
             fixedFriends++;
@@ -527,11 +572,7 @@ module.exports = {
             .setColor("#2ecc71")
             .setTitle("✅ Permissions Fixed!")
             .addFields(
-              {
-                name: "🏠 Rooms Fixed",
-                value: `${fixedRooms}`,
-                inline: true,
-              },
+              { name: "🏠 Rooms Fixed", value: `${fixedRooms}`, inline: true },
               {
                 name: "👥 Friends Updated",
                 value: `${fixedFriends}`,
@@ -556,7 +597,6 @@ module.exports = {
 
     // ==========================================
     // SECURITY & OWNERSHIP VERIFICATION
-    // For commands that must be used in owner's room
     // ==========================================
     const channelRecord = await PersonalChannel.findOne({
       channelId: message.channel.id,
@@ -720,14 +760,26 @@ module.exports = {
 
     // ==========================================
     // ADD FRIEND COMMAND
+    // Supports @mention AND raw user ID
     // ==========================================
     if (subCommand === "add") {
-      const friend = message.mentions.members.first();
+      const rawArg = args[1];
+      if (!rawArg) {
+        return message.channel.send({
+          embeds: [
+            errorEmbed(
+              "❌ Please mention a user or provide their ID to invite.\n**Usage:** `eb room add @user` or `eb room add 123456789`",
+            ),
+          ],
+        });
+      }
+
+      const friend = await resolveUser(rawArg);
       if (!friend) {
         return message.channel.send({
           embeds: [
             errorEmbed(
-              "❌ Please mention a user to invite.\n**Usage:** `eb room add @user`",
+              "❌ Could not find that user. Please provide a valid @mention or User ID.",
             ),
           ],
         });
@@ -739,28 +791,30 @@ module.exports = {
         });
       }
 
-      // Check if already added
+      // ✅ Check if user is a bot
+      if (friend.bot) {
+        return message.channel.send({
+          embeds: [errorEmbed("❌ You cannot add bots to your room!")],
+        });
+      }
+
       const currentData = await PersonalChannel.findOne({
         channelId: message.channel.id,
       });
       if (currentData?.friends?.includes(friend.id)) {
         return message.channel.send({
           embeds: [
-            errorEmbed(
-              `❌ **${friend.user.username}** is already in your room!`,
-            ),
+            errorEmbed(`❌ **${friend.username}** is already in your room!`),
           ],
         });
       }
 
-      // Add to friends list in DB
       await PersonalChannel.findOneAndUpdate(
         { channelId: message.channel.id },
         { $addToSet: { friends: friend.id } },
-         { returnDocument: 'after' }
+        { returnDocument: "after" },
       );
 
-      // Set channel permissions
       await message.channel.permissionOverwrites.edit(friend.id, {
         ViewChannel: true,
         SendMessages: true,
@@ -769,35 +823,60 @@ module.exports = {
         PinMessages: true,
       });
 
+      // Check if user is actually in the server for the display note
+      const friendMember = await message.guild.members
+        .fetch(friend.id)
+        .catch(() => null);
+
       return message.channel.send({
         embeds: [
           new EmbedBuilder()
             .setColor("#2ecc71")
             .setTitle("✅ Friend Invited!")
             .setDescription(
-              `**${friend.user.username}** has been added to your room.\nThey can now view and send messages here.`,
+              `**${friend.username}** has been added to your room.\n${
+                friendMember
+                  ? "They can now view and send messages here."
+                  : "⚠️ Note: This user is not currently in the server, but permissions are saved for when they rejoin."
+              }`,
             )
-            .setThumbnail(friend.user.displayAvatarURL({ dynamic: true })),
+            .addFields({
+              name: "🆔 User ID",
+              value: `\`${friend.id}\``,
+              inline: true,
+            })
+            .setThumbnail(friend.displayAvatarURL({ dynamic: true })),
         ],
       });
     }
 
     // ==========================================
     // REMOVE FRIEND COMMAND
+    // Supports @mention AND raw user ID
     // ==========================================
     if (subCommand === "remove") {
-      const friend = message.mentions.members.first();
-      if (!friend) {
+      const rawArg = args[1];
+      if (!rawArg) {
         return message.channel.send({
           embeds: [
             errorEmbed(
-              "❌ Please mention a user to remove.\n**Usage:** `eb room remove @user`",
+              "❌ Please mention a user or provide their ID to remove.\n**Usage:** `eb room remove @user` or `eb room remove 123456789`",
             ),
           ],
         });
       }
 
-      // Check if they were even added
+      const friend = await resolveUser(rawArg);
+      if (!friend) {
+        return message.channel.send({
+          embeds: [
+            errorEmbed(
+              "❌ Could not find that user. Please provide a valid @mention or User ID.",
+            ),
+          ],
+        });
+      }
+
       const currentData = await PersonalChannel.findOne({
         channelId: message.channel.id,
       });
@@ -805,22 +884,27 @@ module.exports = {
         return message.channel.send({
           embeds: [
             errorEmbed(
-              `❌ **${friend.user.username}** is not in your friends list.`,
+              `❌ **${friend.username}** (ID: \`${friend.id}\`) is not in your friends list.`,
             ),
           ],
         });
       }
 
-      // Remove from friends list in DB
+      // Remove from DB
       await PersonalChannel.findOneAndUpdate(
         { channelId: message.channel.id },
         { $pull: { friends: friend.id } },
-         { returnDocument: 'after' }
+        { returnDocument: "after" },
       );
 
-      // Remove channel permissions
+      // Remove channel permissions (works even if user left server)
       await message.channel.permissionOverwrites
         .delete(friend.id)
+        .catch(() => null);
+
+      // Check if user is still in server for display note
+      const friendMember = await message.guild.members
+        .fetch(friend.id)
         .catch(() => null);
 
       return message.channel.send({
@@ -829,9 +913,18 @@ module.exports = {
             .setColor("#e74c3c")
             .setTitle("🚪 Friend Removed")
             .setDescription(
-              `**${friend.user.username}** has been removed from your room.\nThey can no longer access this channel.`,
+              `**${friend.username}** has been removed from your room.\n${
+                friendMember
+                  ? "They can no longer access this channel."
+                  : "ℹ️ This user has already left the server. Their access permissions have been cleared."
+              }`,
             )
-            .setThumbnail(friend.user.displayAvatarURL({ dynamic: true })),
+            .addFields({
+              name: "🆔 User ID",
+              value: `\`${friend.id}\``,
+              inline: true,
+            })
+            .setThumbnail(friend.displayAvatarURL({ dynamic: true })),
         ],
       });
     }

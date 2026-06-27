@@ -8,7 +8,7 @@ const BOSS_NAMES = [
 ];
 
 class BossService {
-  generateBossHp(playerCount = 10) {
+  generateBossHp(playerCount = 5) {
     // Scale HP: base 5000 + 500 per expected player
     return 5000 + playerCount * 500;
   }
