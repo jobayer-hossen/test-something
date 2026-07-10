@@ -15,17 +15,25 @@ const commandTrackerSchema = new mongoose.Schema({
   },
   command: {
     type: String,
-    required: true // e.g. "legendary_toothbrush"
+    required: true
   },
-  usedAt: {
+  count: {
+    type: Number,
+    default: 1
+  },
+  date: {
+    type: String,  // Store as "2026-07-10" string for easy day matching
+    required: true
+  },
+  expireAt: {
     type: Date,
-    default: Date.now,
-    expires: 60 * 60 * 48 // ✅ Auto delete after 48 hours (2 days)
+    expires: 0 // ✅ Auto delete when expireAt date is reached
   }
 });
 
-// Index for fast queries
-commandTrackerSchema.index({ command: 1, usedAt: -1 });
-commandTrackerSchema.index({ userId: 1, command: 1 });
+// ✅ One document per user per command per day
+commandTrackerSchema.index({ userId: 1, command: 1, date: 1 }, { unique: true });
+commandTrackerSchema.index({ command: 1, date: 1 });
+commandTrackerSchema.index({ expireAt: 1 }, { expireAfterSeconds: 0 });
 
 module.exports = mongoose.model('CommandTracker', commandTrackerSchema);

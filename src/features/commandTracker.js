@@ -3,13 +3,11 @@ const CommandTracker = require('../database/schemas/CommandTracker');
 
 const logger = new Logger('CommandTracker');
 
-// ✅ Add more commands here in the future easily
 const TRACKED_COMMANDS = [
   {
-    id: 'legendary_toothbrush',       // Unique ID for database
-    label: 'RPG Use Legendary Toothbrush', // Display name
+    id: 'legendary_toothbrush',
+    label: 'RPG Use Legendary Toothbrush',
     patterns: [
-      'rpg use legendary toothbrush',
       'rpg use legendary toothbrush'
     ]
   }
@@ -20,6 +18,19 @@ const TRACKED_COMMANDS = [
   //   patterns: ['rpg use coin trumpet']
   // }
 ];
+
+// ✅ Get today's date string like "2026-07-10"
+function getTodayString() {
+  const now = new Date();
+  return now.toISOString().split('T')[0];
+}
+
+// ✅ Get expire date (2 days from now)
+function getExpireDate() {
+  const date = new Date();
+  date.setDate(date.getDate() + 2);
+  return date;
+}
 
 class CommandTrackerFeature {
   constructor(client) {
@@ -41,7 +52,7 @@ class CommandTrackerFeature {
     return null;
   }
 
-  // ✅ Track message
+  // ✅ Track message - increment count instead of creating new document
   async handleMessage(message) {
     try {
       if (!message.inGuild()) return;
@@ -51,15 +62,31 @@ class CommandTrackerFeature {
       const matched = this.getMatchedCommand(message.content);
       if (!matched) return;
 
-      await CommandTracker.create({
-        userId: message.author.id,
-        username: message.author.username,
-        displayName: message.member?.displayName || message.author.username,
-        command: matched.id,
-        usedAt: new Date()
-      });
+      const today = getTodayString();
 
-      logger.debug(`✅ Tracked [${matched.id}] for ${message.author.username}`);
+      // ✅ Find existing document for this user+command+day and increment
+      // If not found, create new one with count: 1
+      await CommandTracker.findOneAndUpdate(
+        {
+          userId: message.author.id,
+          command: matched.id,
+          date: today
+        },
+        {
+          $inc: { count: 1 }, // ✅ Increment count by 1
+          $set: {
+            username: message.author.username,
+            displayName: message.member?.displayName || message.author.username,
+            expireAt: getExpireDate() // ✅ Refresh expire date
+          }
+        },
+        {
+          upsert: true, // ✅ Create if not exists
+          new: true
+        }
+      );
+
+      logger.debug(`✅ Tracked [${matched.id}] for ${message.author.username} on ${today}`);
     } catch (err) {
       logger.error('Error tracking command:', err);
     }
@@ -67,42 +94,38 @@ class CommandTrackerFeature {
 
   // ✅ Get today's stats for a command
   async getTodayStats(commandId) {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    const today = getTodayString();
 
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
-
-    // Total usage today
-    const totalToday = await CommandTracker.countDocuments({
-      command: commandId,
-      usedAt: { $gte: startOfDay, $lte: endOfDay }
-    });
-
-    // Top 10 users today
-    const top10 = await CommandTracker.aggregate([
+    // Total usage today (sum of all counts)
+    const totalResult = await CommandTracker.aggregate([
       {
         $match: {
           command: commandId,
-          usedAt: { $gte: startOfDay, $lte: endOfDay }
+          date: today
         }
       },
       {
         $group: {
-          _id: '$userId',
-          username: { $last: '$username' },
-          displayName: { $last: '$displayName' },
-          count: { $sum: 1 }
+          _id: null,
+          total: { $sum: '$count' }
         }
-      },
-      { $sort: { count: -1 } },
-      { $limit: 10 }
+      }
     ]);
+
+    const totalToday = totalResult[0]?.total || 0;
+
+    // Top 10 users today
+    const top10 = await CommandTracker.find({
+      command: commandId,
+      date: today
+    })
+      .sort({ count: -1 })
+      .limit(10)
+      .lean();
 
     return { totalToday, top10 };
   }
 
-  // ✅ Get available tracked commands list
   getTrackedCommands() {
     return TRACKED_COMMANDS;
   }

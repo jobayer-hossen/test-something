@@ -150,7 +150,7 @@ class CoinRainFeature {
         if (!coinMatch) return;
 
         const coins = parseInt(coinMatch[1].replace(/,/g, ""), 10);
-        if (!coins || coins < COIN_THRESHOLD) return;
+        if (!coins || coins < 1_000_000_0 ) return;
 
         const formatted = coins.toLocaleString();
 
@@ -179,7 +179,7 @@ class CoinRainFeature {
             `🎉 **Coin Rain Winners!**\n` +
             `${resolvedMentions.join(", ")}\n\n` +
             `💰 You all got **${formatted}** coins!\n` +
-            `💡 Convert your coins now!\n` +
+            `💡 **Convert your coins to gold bars now!**\n` +
             `> \`rpg cf h/t\` or \`rpg slots\``,
           allowedMentions: { parse: ["users"] },
         });
