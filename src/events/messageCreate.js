@@ -113,6 +113,10 @@ module.exports = {
         if (client.features?.lootboxSummoning) {
           client.features.lootboxSummoning.handleMessage(message);
         }
+        
+        if (client.features?.commandTracker) {
+          await client.features.commandTracker.handleMessage(message);
+        }
 
         if (client.features?.tournamentManager) {
           await client.features.tournamentManager.handleJoinWord(message);

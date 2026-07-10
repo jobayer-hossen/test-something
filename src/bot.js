@@ -13,6 +13,9 @@ const LootboxSummoningFeature = require("./features/lootboxSummoning");
 const AmanCoinMention = require("./features/amanTrumpetReminder");
 const BaseManager = require("./features/baseManager");
 const TournamentManager = require("./features/tournamentManager");
+const CommandTrackerFeature = require("./features/commandTracker"); 
+const WelcomeMessageFeature = require("./features/welcomeMessage");
+
 
 const logger = new Logger("Bot");
 
@@ -166,6 +169,10 @@ class EpicRPGBot {
     this.client.features.amanTrumpetReminder = new AmanCoinMention(this.client);
     this.client.features.baseManager = new BaseManager(this.client);
     this.client.features.tournamentManager = new TournamentManager(this.client);
+    this.client.features.commandTracker = new CommandTrackerFeature(
+      this.client,
+    );
+    this.client.features.welcomeMessage.initialize();
 
     logger.info("✅ Features loaded");
   }

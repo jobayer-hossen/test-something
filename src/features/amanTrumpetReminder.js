@@ -1,11 +1,20 @@
-const Logger = require('../logger');
-const AmanCoinMention = require('../database/schemas/AmanCoinMention');
+const Logger = require("../logger");
+const AmanCoinMention = require("../database/schemas/AmanCoinMention");
 
-const logger = new Logger('AmanTrumpetReminder');
+const logger = new Logger("AmanTrumpetReminder");
 
-const TARGET_USER_ID = '1116077505783271585'; // Aman's user ID
-const REMINDER_CHANNEL_ID = '1504069016506077275'; // Channel ID
 const COOLDOWN_TIME = 30 * 60 * 1000; // 30 minutes in milliseconds
+const REMINDER_CHANNEL_ID = "1504069016506077275"; // Channel ID
+
+// Define all tracked users
+const TRACKED_USERS = [
+  {
+    userId: "1116077505783271585", // Aman's user ID
+  },
+  {
+    userId: "709084208378806324", // ѕℓαуєя user ID
+  },
+];
 
 class AmanTrumpetReminder {
   constructor(client) {
@@ -18,12 +27,12 @@ class AmanTrumpetReminder {
   async initialize() {
     // Check if database is available
     if (!this.client.db) {
-      logger.warn('⚠️ Database not available - Aman Trumpet Reminder disabled');
+      logger.warn("⚠️ Database not available - Aman Trumpet Reminder disabled");
       return;
     }
 
-    logger.info('🎺 Initializing Aman Trumpet Reminder system...');
-    
+    // logger.info("🎺 Initializing Aman Trumpet Reminder system...");
+
     // Check every minute for reminders
     this.checkInterval = setInterval(() => {
       this.checkReminders();
@@ -34,19 +43,25 @@ class AmanTrumpetReminder {
     // Also check on startup
     setTimeout(() => this.checkReminders(), 5000); // Wait 5 seconds before first check
 
-    logger.info('✅ Aman Trumpet Reminder system initialized');
+    logger.info("✅ Aman Trumpet Reminder system initialized");
+  }
+
+  // Check if user is tracked
+  isTrackedUser(userId) {
+    return TRACKED_USERS.some((user) => user.userId === userId);
   }
 
   // Track when user uses the command
   async trackUsage(userId, message) {
-    if (!this.isInitialized || userId !== TARGET_USER_ID) return;
+    if (!this.isInitialized || !this.isTrackedUser(userId)) return;
 
     const content = message.content.toLowerCase().trim();
-    
+
     // Check if the message is "rpg use coin trumpet"
-    if (content === 'rpg use coin trumpet' || 
-        content.includes('rpg use coin trumpet')) {
-      
+    if (
+      content === "rpg use coin trumpet" ||
+      content.includes("rpg use coin trumpet")
+    ) {
       try {
         await AmanCoinMention.findOneAndUpdate(
           { userId: userId },
@@ -54,17 +69,17 @@ class AmanTrumpetReminder {
             userId: userId,
             lastUsed: new Date(),
             reminderSent: false,
-            missedCount: 0 // Reset missed count when they use it
+            missedCount: 0, // Reset missed count when they use it
           },
-          { 
-            upsert: true, 
-            returnDocument: 'after' // ← FIXED: Changed from 'new: true'
-          }
+          {
+            upsert: true,
+            returnDocument: "after",
+          },
         );
 
         logger.debug(`✅ Tracked RPG trumpet usage for user ${userId}`);
       } catch (error) {
-        logger.error('Error tracking RPG usage:', error);
+        logger.error("Error tracking RPG usage:", error);
       }
     }
   }
@@ -73,11 +88,19 @@ class AmanTrumpetReminder {
   async checkReminders() {
     if (!this.isInitialized) return;
 
+    // Check reminders for all tracked users
+    for (const trackedUser of TRACKED_USERS) {
+      await this.checkUserReminder(trackedUser.userId);
+    }
+  }
+
+  // Check reminder for a specific user
+  async checkUserReminder(userId) {
     try {
-      const userData = await AmanCoinMention.findOne({ userId: TARGET_USER_ID });
+      const userData = await AmanCoinMention.findOne({ userId });
 
       if (!userData || !userData.lastUsed) {
-        logger.debug('No usage data found for reminders');
+        logger.debug(`No usage data found for user ${userId}`);
         return;
       }
 
@@ -89,7 +112,7 @@ class AmanTrumpetReminder {
         await this.sendReminder(userData, timeSinceLastUse);
       }
     } catch (error) {
-      logger.error('Error checking reminders:', error);
+      logger.error(`Error checking reminder for user ${userId}:`, error);
     }
   }
 
@@ -98,13 +121,13 @@ class AmanTrumpetReminder {
     try {
       const channel = await this.client.channels.fetch(REMINDER_CHANNEL_ID);
       if (!channel) {
-        logger.error('Reminder channel not found');
+        logger.error("Reminder channel not found");
         return;
       }
 
-      const user = await this.client.users.fetch(TARGET_USER_ID);
+      const user = await this.client.users.fetch(userData.userId);
       if (!user) {
-        logger.error('Target user not found');
+        logger.error(`Target user ${userData.userId} not found`);
         return;
       }
 
@@ -127,33 +150,41 @@ class AmanTrumpetReminder {
 
       // Update database
       await AmanCoinMention.findOneAndUpdate(
-        { userId: TARGET_USER_ID },
+        { userId: userData.userId },
         {
           reminderSent: true,
-          missedCount: newMissedCount
+          missedCount: newMissedCount,
         },
-        { returnDocument: 'after' } // ← FIXED: Changed from 'new: true'
+        { returnDocument: "after" },
       );
 
-      logger.info(`📨 Sent reminder to user ${TARGET_USER_ID} (missed: ${newMissedCount})`);
+      logger.info(
+        `📨 Sent reminder to user ${userData.userId} (missed: ${newMissedCount})`,
+      );
     } catch (error) {
-      logger.error('Error sending reminder:', error);
+      logger.error("Error sending reminder:", error);
     }
   }
 
-  // Get current status (for debugging/commands)
-  async getStatus() {
+  // Get current status for a specific user (for debugging/commands)
+  async getStatus(userId = TRACKED_USERS[0].userId) {
     if (!this.isInitialized) {
-      return { active: false, message: 'Feature not initialized' };
+      return { active: false, message: "Feature not initialized" };
+    }
+
+    // Validate that the userId is tracked
+    if (!this.isTrackedUser(userId)) {
+      return { active: false, message: `User ${userId} is not tracked` };
     }
 
     try {
-      const userData = await AmanCoinMention.findOne({ userId: TARGET_USER_ID });
-      
+      const userData = await AmanCoinMention.findOne({ userId });
+
       if (!userData || !userData.lastUsed) {
         return {
           active: true,
-          message: 'No usage recorded yet'
+          userId,
+          message: "No usage recorded yet",
         };
       }
 
@@ -163,16 +194,29 @@ class AmanTrumpetReminder {
 
       return {
         active: true,
+        userId,
         lastUsed: userData.lastUsed,
         timeSinceLastUse,
         timeRemaining: timeRemaining > 0 ? timeRemaining : 0,
         missedCount: userData.missedCount,
-        reminderSent: userData.reminderSent
+        reminderSent: userData.reminderSent,
       };
     } catch (error) {
-      logger.error('Error getting status:', error);
+      logger.error("Error getting status:", error);
       return { active: false, error: error.message };
     }
+  }
+
+  // Get status for all tracked users
+  async getAllStatus() {
+    const statuses = [];
+
+    for (const trackedUser of TRACKED_USERS) {
+      const status = await this.getStatus(trackedUser.userId);
+      statuses.push(status);
+    }
+
+    return statuses;
   }
 }
 
