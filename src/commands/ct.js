@@ -1,53 +1,34 @@
+// commands/ct.js  ← RENAME from eb.js to ct.js
 const CommandTracker = require('../database/schemas/CommandTracker');
 const Logger = require('../logger');
 
-const logger = new Logger('EbCommand');
+const logger = new Logger('CtCommand');
 
-// ✅ Leaderboard shortcodes - add more in future
 const COMMAND_SHORTCUTS = {
   'ct': {
     id: 'legendary_toothbrush',
     label: '🪥 RPG Use Legendary Toothbrush'
   }
-  // Future:
+  // Add more in future:
   // 'tr': { id: 'coin_trumpet', label: '🎺 RPG Use Coin Trumpet' }
 };
 
 module.exports = {
-  name: 'eb',
-  description: 'Check command usage leaderboard',
+  name: 'ct', // ← CHANGE from 'eb' to 'ct'
+  description: 'Check legendary toothbrush leaderboard',
 
   async execute(message, args, client) {
     try {
-      // ✅ eb ct → check legendary toothbrush leaderboard
-      const subCommand = args[0]?.toLowerCase();
-
-      if (!subCommand) {
-        return await sendHelpMessage(message);
-      }
-
-      const commandInfo = COMMAND_SHORTCUTS[subCommand];
-
-      if (!commandInfo) {
-        return await message.reply({
-          content:
-            `❌ Unknown shortcode \`${subCommand}\`\n\n` +
-            `**Available shortcuts:**\n` +
-            Object.entries(COMMAND_SHORTCUTS)
-              .map(([key, val]) => `> \`eb ${key}\` → ${val.label}`)
-              .join('\n')
-        });
-      }
-
+      // eb ct → no extra args needed, directly show leaderboard
+      const commandInfo = COMMAND_SHORTCUTS['ct'];
       await sendLeaderboard(message, commandInfo);
     } catch (err) {
-      logger.error('Error in eb command:', err);
+      logger.error('Error in ct command:', err);
       await message.reply('❌ Something went wrong. Please try again.');
     }
   }
 };
 
-// ✅ Send leaderboard embed
 async function sendLeaderboard(message, commandInfo) {
   const now = new Date();
   const startOfDay = new Date();
@@ -98,7 +79,6 @@ async function sendLeaderboard(message, commandInfo) {
     });
   }
 
-  // Date string
   const dateStr = now.toLocaleDateString('en-US', {
     weekday: 'long',
     year: 'numeric',
@@ -115,19 +95,4 @@ async function sendLeaderboard(message, commandInfo) {
     `\n_Data resets every 2 days automatically_`;
 
   await message.reply({ content: response });
-}
-
-// ✅ Help message
-async function sendHelpMessage(message) {
-  const shortcuts = Object.entries(COMMAND_SHORTCUTS)
-    .map(([key, val]) => `> \`eb ${key}\` → ${val.label}`)
-    .join('\n');
-
-  await message.reply({
-    content:
-      `**📊 Command Usage Leaderboard**\n\n` +
-      `**Usage:** \`eb <shortcode>\`\n\n` +
-      `**Available Shortcuts:**\n` +
-      shortcuts
-  });
 }

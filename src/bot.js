@@ -8,14 +8,13 @@ const config = require("./config");
 const database = require("./database/connection");
 
 // Features
+const WelcomeMessageFeature = require("./features/welcomeMessage");
 const CoinRainFeature = require("./features/coinRain");
 const LootboxSummoningFeature = require("./features/lootboxSummoning");
 const AmanCoinMention = require("./features/amanTrumpetReminder");
 const BaseManager = require("./features/baseManager");
 const TournamentManager = require("./features/tournamentManager");
-const CommandTrackerFeature = require("./features/commandTracker"); 
-const WelcomeMessageFeature = require("./features/welcomeMessage");
-
+const CommandTrackerFeature = require("./features/commandTracker");
 
 const logger = new Logger("Bot");
 
@@ -170,6 +169,9 @@ class EpicRPGBot {
     this.client.features.baseManager = new BaseManager(this.client);
     this.client.features.tournamentManager = new TournamentManager(this.client);
     this.client.features.commandTracker = new CommandTrackerFeature(
+      this.client,
+    );
+    this.client.features.welcomeMessage = new WelcomeMessageFeature(
       this.client,
     );
     this.client.features.welcomeMessage.initialize();
