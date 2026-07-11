@@ -77,7 +77,7 @@ class AmanTrumpetReminder {
           },
         );
 
-        logger.debug(`✅ Tracked RPG trumpet usage for user ${userId}`);
+        // logger.debug(`✅ Tracked RPG trumpet usage for user ${userId}`);
       } catch (error) {
         logger.error("Error tracking RPG usage:", error);
       }

@@ -79,16 +79,16 @@ module.exports = {
               "`eb room add @user` - Invite a friend to your room",
               "`eb room remove @user` - Remove a friend from your room",
               "`eb room remove 123456789` - Remove by ID (if user left server)",
-              "`eb room rename new-name` - Change your room's name",
+              "`eb room rename 😎-new-name` - Change your room's name",
             ].join("\n"),
             inline: false,
           },
           {
             name: "💡 Tips",
             value: [
+              "• If you are inactive for 7 days, your room may be auto-deleted to save space.",
               "• Management commands only work inside **your own room**",
               "• `eb room info` works anywhere to check room status",
-              "• Use `eb room info @user` to check another user's room (Staff only)",
               "• You can use a **User ID** instead of @mention if someone left the server",
             ].join("\n"),
             inline: false,

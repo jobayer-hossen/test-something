@@ -3,33 +3,28 @@ const CommandTracker = require('../database/schemas/CommandTracker');
 
 const logger = new Logger('CommandTracker');
 
+const EPIC_RPG_BOT_ID = '555955826880413696';
+
 const TRACKED_COMMANDS = [
   {
     id: 'legendary_toothbrush',
-    label: 'RPG Use Legendary Toothbrush',
+    label: 'Legendary Toothbrush',
+    // ✅ Matches plain text OR custom Discord emoji (<:name:id>)
     patterns: [
-      'rpg use legendary toothbrush'
+      /casts a magic spell with the .*?legendary toothbrush/i
     ]
-  }
-  // Future example:
+  },
   // {
   //   id: 'coin_trumpet',
-  //   label: 'RPG Use Coin Trumpet',
-  //   patterns: ['rpg use coin trumpet']
+  //   label: 'Coin Trumpet',
+  //   patterns: [
+  //     /plays a trumpet made of coins/i
+  //   ]
   // }
 ];
 
-// ✅ Get today's date string like "2026-07-10"
 function getTodayString() {
-  const now = new Date();
-  return now.toISOString().split('T')[0];
-}
-
-// ✅ Get expire date (2 days from now)
-function getExpireDate() {
-  const date = new Date();
-  date.setDate(date.getDate() + 2);
-  return date;
+  return new Date().toISOString().split('T')[0];
 }
 
 class CommandTrackerFeature {
@@ -37,97 +32,110 @@ class CommandTrackerFeature {
     this.client = client;
   }
 
-  // ✅ Check if message matches any tracked command
-  getMatchedCommand(content) {
-    const normalized = content.toLowerCase().trim();
+  // ✅ Step 1: Parse the message from Epic RPG
+  parseEpicRPGMessage(message) {
+    // Only listen to Epic RPG bot
+    if (message.author.id !== EPIC_RPG_BOT_ID) return null;
+    if (!message.content) return null;
+
+    const content = message.content.trim();
+    const firstLine = content.split('\n')[0];
 
     for (const cmd of TRACKED_COMMANDS) {
       for (const pattern of cmd.patterns) {
-        if (normalized === pattern || normalized.startsWith(pattern)) {
-          return cmd;
+        if (pattern.test(firstLine)) {
+          // ✅ Extracts "ichigo271" from "ichigo271 casts a magic spell..."
+          const usernameMatch = firstLine.match(/^(.+?)\s+(casts|plays|uses)/i);
+          
+          if (usernameMatch) {
+            return {
+              command: cmd,
+              username: usernameMatch[1].replace(/[*_`~]/g, '').trim(), // Clean formatting
+              mentionedUser: message.mentions.users.first() || null
+            };
+          }
         }
       }
     }
+    return null;
+  }
+
+  // ✅ Step 2: Try to get User ID from Reply/Interaction Reference
+  async getUserFromContext(message, username) {
+    // 1. Check if it's a reply to a user's command
+    if (message.reference && message.reference.messageId) {
+      try {
+        const refMsg = await message.channel.messages.fetch(message.reference.messageId);
+        if (refMsg && !refMsg.author.bot) return refMsg.author;
+      } catch (err) {}
+    }
+
+    // 2. Check interaction (if user used a slash command)
+    if (message.interaction && message.interaction.user) {
+      return message.interaction.user;
+    }
+
+    // 3. Check guild cache by exact Username or Display Name
+    const member = message.guild.members.cache.find(
+      m => m.user.username.toLowerCase() === username.toLowerCase() ||
+           m.displayName.toLowerCase() === username.toLowerCase()
+    );
+    if (member) return member.user;
+
+    // 4. Force fetch from Discord API if not in cache
+    try {
+      const fetchedMembers = await message.guild.members.fetch({ query: username, limit: 1 });
+      const firstFound = fetchedMembers.first();
+      if (firstFound) return firstFound.user;
+    } catch (err) {}
 
     return null;
   }
 
-  // ✅ Track message - increment count instead of creating new document
+  // ✅ Step 3: Main Listener (Works in ANY channel of the server)
   async handleMessage(message) {
     try {
+      // Must be in a guild (server) and sent by Epic RPG
       if (!message.inGuild()) return;
-      if (message.author.bot) return;
-      if (!message.content) return;
+      if (message.author.id !== EPIC_RPG_BOT_ID) return;
 
-      const matched = this.getMatchedCommand(message.content);
-      if (!matched) return;
+      // Check if the message matches our pattern
+      const parsed = this.parseEpicRPGMessage(message);
+      if (!parsed) return;
+
+      // Identify the user who used it
+      let user = parsed.mentionedUser || await this.getUserFromContext(message, parsed.username);
 
       const today = getTodayString();
+      const userId = user ? user.id : `unknown_${parsed.username.toLowerCase()}`;
+      const username = user ? user.username : parsed.username;
+      const displayName = user && message.guild.members.cache.get(user.id)?.displayName 
+        ? message.guild.members.cache.get(user.id).displayName 
+        : parsed.username;
 
-      // ✅ Find existing document for this user+command+day and increment
-      // If not found, create new one with count: 1
-      await CommandTracker.findOneAndUpdate(
+      // Save to database permanently & increment count
+      const result = await CommandTracker.findOneAndUpdate(
         {
-          userId: message.author.id,
-          command: matched.id,
+          userId: userId,
+          command: parsed.command.id,
           date: today
         },
         {
-          $inc: { count: 1 }, // ✅ Increment count by 1
+          $inc: { count: 1 },
           $set: {
-            username: message.author.username,
-            displayName: message.member?.displayName || message.author.username,
-            expireAt: getExpireDate() // ✅ Refresh expire date
+            username: username,
+            displayName: displayName,
+            lastUpdated: new Date()
           }
         },
-        {
-          upsert: true, // ✅ Create if not exists
-          new: true
-        }
+        { upsert: true, new: true }
       );
 
-      logger.debug(`✅ Tracked [${matched.id}] for ${message.author.username} on ${today}`);
+      logger.info(`✅ [TRACKED] ${displayName} (${userId}) used ${parsed.command.label} on ${today} -> Total today: ${result.count}`);
+
     } catch (err) {
-      logger.error('Error tracking command:', err);
+      logger.error('Error in CommandTracker handleMessage:', err);
     }
-  }
-
-  // ✅ Get today's stats for a command
-  async getTodayStats(commandId) {
-    const today = getTodayString();
-
-    // Total usage today (sum of all counts)
-    const totalResult = await CommandTracker.aggregate([
-      {
-        $match: {
-          command: commandId,
-          date: today
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: '$count' }
-        }
-      }
-    ]);
-
-    const totalToday = totalResult[0]?.total || 0;
-
-    // Top 10 users today
-    const top10 = await CommandTracker.find({
-      command: commandId,
-      date: today
-    })
-      .sort({ count: -1 })
-      .limit(10)
-      .lean();
-
-    return { totalToday, top10 };
-  }
-
-  getTrackedCommands() {
-    return TRACKED_COMMANDS;
   }
 }
 

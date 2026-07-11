@@ -29,7 +29,7 @@ class TournamentManager {
   scheduleNext() {
     if (this.spawnTimer) clearTimeout(this.spawnTimer);
     this.spawnTimer = setTimeout(() => this.spawnTournament(), TOURNAMENT_INTERVAL);
-    logger.info(`Next tournament in ${TOURNAMENT_INTERVAL / 60000} minutes`);
+    // logger.info(`Next tournament in ${TOURNAMENT_INTERVAL / 60000} minutes`);
   }
 
   async spawnTournament() {

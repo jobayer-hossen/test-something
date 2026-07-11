@@ -102,7 +102,7 @@ class WelcomeMessageFeature {
       // ✅ Send embed
       await channel.send({ embeds: [embed] });
 
-      logger.info(`✅ Welcomed ${member.user.username} — Member #${member.guild.memberCount}`);
+      // logger.info(`✅ Welcomed ${member.user.username} — Member #${member.guild.memberCount}`);
     } catch (err) {
       logger.error("Error sending welcome message:", err);
     }
