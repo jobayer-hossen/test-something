@@ -3,73 +3,102 @@ const Logger = require("../logger");
 
 const logger = new Logger("WelcomeMessage");
 
-const WELCOME_CHANNEL_ID = "1525186631907151953";
-
-const WELCOME_GIFS = [
-  "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExOHpnbmpwZjAzZzZjaWZ1dm9mazk4ZG8zNG91OWtwdHdmb3hnNWgzNCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l0MYC0LajbaPoEADu/giphy.gif",
-  "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExcTF6Z3JwNWs0cnRya2NnajdhNTFoMHk0bTc1ZGFjczA1YWYzdDk5NCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3oEjHQn7PBRvy9A5mE/giphy.gif",
-];
+const WELCOME_CHANNEL_ID = "1526253398863642797";
 
 const CHANNELS = {
   rules: "1506670308470423763",
-  general: "1330215688547209352",
+  pingRoles: "1470272561106522304",
+  colorRoles: "1470272458375565375",
   announcements: "1452091225870962903",
-  ping: "1470272561106522304",
+  epicEvents: "1472272358734692352",
+  general: "1330215688547209352",
+  help: "1501580781838139602",
+  suggestions: "1490143542239170631",
 };
 
-function getRandomGif() {
-  return WELCOME_GIFS[Math.floor(Math.random() * WELCOME_GIFS.length)];
+const SPECIAL_PING_LINK =
+  "https://discord.com/channels/894383235063222313/1470272561106522304/1470820456444723375";
+
+const COLORS = [
+  0x5865f2, // Blurple
+  0x57f287, // Green
+  0xfee75c, // Yellow
+  0xeb459e, // Pink
+  0x3498db, // Blue
+  0x9b59b6, // Purple
+  0x1abc9c, // Teal
+];
+
+const WELCOME_MESSAGES = [
+  "Welcome aboard! We're happy to have you here. 🎉",
+  "We're glad to have you here! Enjoy your stay. ✨",
+  "Hope you enjoy your stay with us! 🌟",
+  "Thanks for joining our community! 💙",
+  "A new trainer has joined the adventure! ⚡",
+  "Great to have you with us! 🎊",
+  "Welcome! We hope you have an amazing time here. 🚀",
+  "Your adventure starts now. Welcome! 🎮",
+  "Thanks for being part of our community! 🌈",
+  "A warm welcome! Have fun and make new friends. 🔥",
+  "Wishing you an awesome journey with us! 🍀",
+];
+
+const GOODBYE_MESSAGES = [
+  "has left the server. Goodbye! 👋",
+  "left the adventure. We'll miss you! 🌅",
+  "has departed. Take care! 💙",
+  "has left us. Hope to see you again! 🍃",
+  "said goodbye. Best of luck! ✨",
+  "has moved on to a new adventure! 🌟",
+  "packed their bags and headed off. Safe travels! 🎒",
+  "has left the community. Wishing you all the best! 🍀",
+  "has signed off. Until next time! 💫",
+  "quietly left the server. Farewell! 🚪",
+];
+
+function random(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
 function buildWelcomeEmbed(member) {
-  const avatarURL = member.user.displayAvatarURL({
+  const avatar = member.user.displayAvatarURL({
+    extension: "png",
     size: 256,
-    dynamic: true,
-    format: "png",
   });
 
-  const memberCount = member.guild.memberCount;
-
-  const embed = new EmbedBuilder()
-    .setColor(0x5865f2) // Discord blurple - clean and professional
+  return new EmbedBuilder()
+    .setColor(random(COLORS))
     .setAuthor({
-      name: `✨ Welcome to ${member.guild.name}!`,
+      name: `Welcome to ${member.guild.name}`,
       iconURL: member.guild.iconURL({ dynamic: true }),
     })
+    .setThumbnail(avatar)
     .setDescription(
-      `Hey ${member} ! We're glad to have you here 🎉\n` +
-      `To get started, please check out the following channels.\n`
+      [
+        random(WELCOME_MESSAGES),
+
+        " ",
+
+        "**Start here:**",
+        `<#${CHANNELS.rules}> ➝ Read the server rules.`,
+        `${SPECIAL_PING_LINK} ➝ Set your RPG notification roles.`,
+        `<#${CHANNELS.epicEvents}> ➝ Join epic events.`,
+        `<#${CHANNELS.announcements}> ➝ Stay updated with announcements.`,
+        `<#${CHANNELS.colorRoles}> ➝ Look color role.`,
+
+        "ㅤ",
+
+        "**Community:**",
+        `<#${CHANNELS.general}> ➝ Chat with everyone.`,
+        `<#${CHANNELS.help}> ➝ Need help? Ask here.`,
+        `<#${CHANNELS.suggestions}> ➝ Share your suggestions.`,
+      ].join("\n"),
     )
-    .addFields(
-      {
-        name: "📜 Rules",
-        value: `Please read <#${CHANNELS.rules}> to understand our guidelines.`,
-        inline: false,
-      },
-      {
-        name: "🔔 Ping Roles",
-        value: `Grab your roles in <#${CHANNELS.ping}> to unlock the server.`,
-        inline: false,
-      },
-      {
-        name: "📢 Announcements",
-        value: `Stay updated in <#${CHANNELS.announcements}>.`,
-        inline: false,
-      },
-      {
-        name: "💬 General Chat",
-        value: `Say hello and meet everyone in <#${CHANNELS.general}>!`,
-        inline: false,
-      }
-    )
-    .setThumbnail(avatarURL) // ✅ User avatar on right side
     .setFooter({
-      text: `Member #${memberCount} • Enjoy your stay!`,
-      iconURL: avatarURL,
+      text: `Member #${member.guild.memberCount}`,
+      iconURL: avatar,
     })
     .setTimestamp();
-
-  return embed;
 }
 
 class WelcomeMessageFeature {
@@ -78,33 +107,46 @@ class WelcomeMessageFeature {
   }
 
   initialize() {
-    this.client.on("guildMemberAdd", async (member) => {
-      await this.handleMemberJoin(member);
+    this.client.on("guildMemberAdd", (member) => {
+      this.handleMemberJoin(member);
     });
 
-    logger.info("✅ Welcome Message feature initialized");
+    this.client.on("guildMemberRemove", (member) => {
+      this.handleMemberLeave(member);
+    });
+
+    logger.info("✅ Welcome Message initialized");
   }
 
   async handleMemberJoin(member) {
     try {
       const channel = await this.client.channels.fetch(WELCOME_CHANNEL_ID);
-      if (!channel) {
-        logger.error("Welcome channel not found!");
-        return;
-      }
 
-      const gif = getRandomGif();
-      const embed = buildWelcomeEmbed(member);
+      if (!channel) return;
 
-      // ✅ Send GIF first
-      await channel.send({ content: gif });
-
-      // ✅ Send embed
-      await channel.send({ embeds: [embed] });
-
-      // logger.info(`✅ Welcomed ${member.user.username} — Member #${member.guild.memberCount}`);
+      await channel.send({
+        content: `## ✨ 𝐖𝐄𝐋𝐂𝐎𝐌𝐄  ${member}!`,
+        embeds: [buildWelcomeEmbed(member)],
+        allowedMentions: {
+          users: [member.id],
+        },
+      });
     } catch (err) {
       logger.error("Error sending welcome message:", err);
+    }
+  }
+
+  async handleMemberLeave(member) {
+    try {
+      const channel = await this.client.channels.fetch(WELCOME_CHANNEL_ID);
+
+      if (!channel) return;
+
+      await channel.send(
+        `🏃 **${member.user.tag}** ${random(GOODBYE_MESSAGES)}`,
+      );
+    } catch (err) {
+      logger.error("Error sending goodbye message:", err);
     }
   }
 }

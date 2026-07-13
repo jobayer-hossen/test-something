@@ -158,9 +158,9 @@ class AmanTrumpetReminder {
         { returnDocument: "after" },
       );
 
-      logger.info(
-        `📨 Sent reminder to user ${userData.userId} (missed: ${newMissedCount})`,
-      );
+      // logger.info(
+      //   `📨 Sent reminder to user ${userData.userId} (missed: ${newMissedCount})`,
+      // );
     } catch (error) {
       logger.error("Error sending reminder:", error);
     }

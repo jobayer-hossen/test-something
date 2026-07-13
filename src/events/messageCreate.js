@@ -110,8 +110,8 @@ module.exports = {
           client.features.coinRain.handleMessage(message);
         }
 
-        if (client.features?.lootboxSummoning) {
-          client.features.lootboxSummoning.handleMessage(message);
+        if (client.features?.LootBoxSummoningFeature) {
+          client.features.LootBoxSummoningFeature.handleMessage(message);
         }
         
         if (client.features?.commandTracker) {

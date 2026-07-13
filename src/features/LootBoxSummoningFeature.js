@@ -1,7 +1,7 @@
 const Logger = require("../logger");
-const logger = new Logger("LootboxSummoning");
+const logger = new Logger("LootBoxSummoningFeature");
 
-class LootboxSummoningFeature {
+class LootBoxSummoningFeature {
   constructor(client) {
     this.client = client;
     this.roleId = "1470272874161111061";
@@ -51,4 +51,4 @@ class LootboxSummoningFeature {
   }
 }
 
-module.exports = LootboxSummoningFeature;
+module.exports = LootBoxSummoningFeature;

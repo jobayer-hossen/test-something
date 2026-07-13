@@ -131,7 +131,7 @@ class CommandTrackerFeature {
         { upsert: true, new: true }
       );
 
-      logger.info(`✅ [TRACKED] ${displayName} (${userId}) used ${parsed.command.label} on ${today} -> Total today: ${result.count}`);
+      // logger.info(`✅ [TRACKED] ${displayName} (${userId}) used ${parsed.command.label} on ${today} -> Total today: ${result.count}`);
 
     } catch (err) {
       logger.error('Error in CommandTracker handleMessage:', err);

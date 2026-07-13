@@ -19,9 +19,10 @@ module.exports = {
 
       setInterval(() => {
         const activities = [
+          { name: "Super donor GA in EPIC-BOTS", type: 3 },
           { name: "EPIC-BOTS | Vibing 🎮", type: 0 },
           { name: "🌧️ Coin Rains in EPIC-BOTS", type: 3 },
-          { name: "🎁 Lootbox Events in EPIC-BOTS", type: 3 },
+          { name: "🎁 LootBox Events in EPIC-BOTS", type: 3 },
           { name: "🤝 Invite your friends to EPIC-BOTS", type: 3 },
         ];
         const randomActivity =

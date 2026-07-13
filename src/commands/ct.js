@@ -7,8 +7,7 @@ const logger = new Logger("CtCommand");
 const COMMAND_INFO = {
   id: "legendary_toothbrush",
   label: "🪥 Legendary Toothbrush",
-  emoji: "🪥",
-  color: 0x00d9ff, // Cyan blue color
+  color: 0x00d9ff,
 };
 
 module.exports = {
@@ -17,7 +16,6 @@ module.exports = {
 
   async execute(message, args, client) {
     try {
-      // Parse arguments
       const daysArg = args[0];
       let days = 1; // Default: today only
 
@@ -49,11 +47,12 @@ module.exports = {
   },
 };
 
-// ✅ Today's leaderboard
+// ════════════════════════════════════════════
+//           TODAY'S LEADERBOARD
+// ════════════════════════════════════════════
 async function sendTodayLeaderboard(message, commandInfo) {
   const today = getTodayString();
 
-  // Total usage today
   const totalResult = await CommandTracker.aggregate([
     {
       $match: {
@@ -72,7 +71,6 @@ async function sendTodayLeaderboard(message, commandInfo) {
 
   const stats = totalResult[0] || { total: 0, uniqueUsers: 0 };
 
-  // Top 10 users today
   const top10 = await CommandTracker.find({
     command: commandInfo.id,
     date: today,
@@ -91,60 +89,121 @@ async function sendTodayLeaderboard(message, commandInfo) {
   await message.channel.send({ embeds: [embed] });
 }
 
-// ✅ Last X days leaderboard
+// ════════════════════════════════════════════
+//        RANGE LEADERBOARD (X days)
+// ════════════════════════════════════════════
 async function sendRangeLeaderboard(message, commandInfo, days) {
   const dates = getLastNDays(days);
 
-  // Get all data for these dates
   const allData = await CommandTracker.find({
     command: commandInfo.id,
     date: { $in: dates },
   }).lean();
 
-  // Aggregate by user
-  const userTotals = new Map();
+  const last2Dates = dates.slice(0, 2);
+
+  const userMap = new Map();
 
   for (const record of allData) {
-    const existing = userTotals.get(record.userId) || {
+    const existing = userMap.get(record.userId) || {
       userId: record.userId,
       username: record.username,
       displayName: record.displayName,
       total: 0,
+      dailyBreakdown: {},
     };
+
     existing.total += record.count;
-    userTotals.set(record.userId, existing);
+
+    if (last2Dates.includes(record.date)) {
+      existing.dailyBreakdown[record.date] = record.count;
+    }
+
+    userMap.set(record.userId, existing);
   }
 
-  // Sort and get top 10
-  const top10 = Array.from(userTotals.values())
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 10);
-
-  const totalUsage = Array.from(userTotals.values()).reduce(
-    (sum, user) => sum + user.total,
-    0,
+  // ✅ ALL users sorted (no .slice(0, 10) limit)
+  const allUsers = Array.from(userMap.values()).sort(
+    (a, b) => b.total - a.total,
   );
 
-  const uniqueUsers = userTotals.size;
+  const totalUsage = allUsers.reduce((sum, user) => sum + user.total, 0);
+  const uniqueUsers = userMap.size;
 
   const embed = new EmbedBuilder()
     .setColor(commandInfo.color)
-    .setTitle(`${commandInfo.emoji} ${commandInfo.label} — Last ${days} Days`)
-    .setDescription(buildRangeDescription(totalUsage, uniqueUsers, top10, days))
+    .setTitle(`${commandInfo.label} — Last ${days} Days`)
+    .setDescription(
+      buildRangeDescription(
+        totalUsage,
+        uniqueUsers,
+        allUsers,
+        days,
+        last2Dates,
+      ),
+    )
     .setFooter({
-      text: `📅 ${formatDate(new Date(dates[dates.length - 1]))} to ${formatDate(new Date())}`,
+      text: `📅 ${formatDate(new Date(dates[dates.length - 1]))} to ${formatDate(new Date())} • ${uniqueUsers} user(s)`,
     })
     .setTimestamp();
 
   await message.channel.send({ embeds: [embed] });
 }
 
-// ✅ Build today's description
+// ════════════════════════════════════════════
+//        BUILD RANGE DESCRIPTION
+// ════════════════════════════════════════════
+function buildRangeDescription(total, uniqueUsers, allUsers, days, last2Dates) {
+  let description = `📊 **Total Usage:** ${total.toLocaleString()}\n`;
+  // ✅ Show "All X Users" instead of "Top 10 Users"
+  description += `**🏆 All ${uniqueUsers} User${uniqueUsers !== 1 ? "s" : ""}**\n\n`;
+
+  if (allUsers.length === 0) {
+    description += "```\nNo usage recorded in this period!\n```";
+    return description;
+  }
+
+  const medals = ["🥇", "🥈", "🥉"];
+
+  const dateLabel0 = formatDateShort(last2Dates[0]);
+  const dateLabel1 = last2Dates[1] ? formatDateShort(last2Dates[1]) : null;
+
+  allUsers.forEach((user, index) => {
+    const medal = medals[index] || `\`${String(index + 1).padStart(2, "0")}\``;
+    const name = (user.displayName || user.username).substring(0, 20);
+    const totalCount = user.total.toLocaleString();
+
+    let breakdown = "";
+
+    if (last2Dates.length >= 1) {
+      const count0 = user.dailyBreakdown[last2Dates[0]] || 0;
+
+      if (last2Dates.length >= 2 && dateLabel1) {
+        const count1 = user.dailyBreakdown[last2Dates[1]] || 0;
+        breakdown = ` _(${dateLabel0}: **${count0.toLocaleString()}** | ${dateLabel1}: **${count1.toLocaleString()}**)_`;
+      } else {
+        breakdown = ` _(${dateLabel0}: **${count0.toLocaleString()}**)_`;
+      }
+    }
+
+    description += `${medal} **${name}** — 🪥**${totalCount}**${breakdown}\n`;
+  });
+
+  // ✅ Discord embed description limit is 4096 chars - warn if close
+  if (description.length > 3900) {
+    description =
+      description.substring(0, 3900) + "\n`... and more (too many to display)`";
+  }
+
+  return description;
+}
+
+// ════════════════════════════════════════════
+//         BUILD TODAY DESCRIPTION
+// ════════════════════════════════════════════
 function buildTodayDescription(stats, top10) {
   let description = `📊 **Total Usage:** ${stats.total.toLocaleString()}\n`;
-  description += `👥 **Unique Users:** ${stats.uniqueUsers}\n`;
-
-  description += "**🏆 Top 10 Users**\n\n";
+  description += `**🏆 Top 10 Users**\n\n`;
 
   if (top10.length === 0) {
     description += "```\nNo usage recorded today yet!\n```";
@@ -156,47 +215,24 @@ function buildTodayDescription(stats, top10) {
   top10.forEach((user, index) => {
     const medal = medals[index] || `\`${String(index + 1).padStart(2, "0")}\``;
     const name = (user.displayName || user.username).substring(0, 20);
-    const count = user.count.toLocaleString().padStart(2, " ");
 
-    description += `${medal} **${name}** — 🪥**${user.count}** \n`;
+    description += `${medal} **${name}** — 🪥**${user.count.toLocaleString()}**\n`;
   });
 
   return description;
 }
 
-// ✅ Build range description
-function buildRangeDescription(total, uniqueUsers, top10, days) {
-  let description = `📊 **Total Usage:** ${total.toLocaleString()}\n`;
-  description += `👥 **Unique Users:** ${uniqueUsers}\n`;
-  description += `📈 **Average/Day:** ${Math.round(total / days).toLocaleString()}\n\n`;
+// ════════════════════════════════════════════
+//              DATE HELPERS
+// ════════════════════════════════════════════
 
-  if (top10.length === 0) {
-    description += "```\nNo usage recorded in this period!\n```";
-    return description;
-  }
-
-  description += "**🏆 Top 10 Users**\n";
-
-  const medals = ["🥇", "🥈", "🥉"];
-
-  top10.forEach((user, index) => {
-    const medal = medals[index] || `\`${String(index + 1).padStart(2, "0")}\``;
-    const name = (user.displayName || user.username).substring(0, 20);
-    const count = user.total.toLocaleString().padStart(6, " ");
-    const avg = Math.round(user.total / days);
-
-    description += `${medal} **${name}** \`${count}x\` _(~${avg}/day)_\n`;
-  });
-
-  return description;
-}
-
-// ✅ Helper: Get today's date string
+// "2026-07-11" → today's date string
 function getTodayString() {
   return new Date().toISOString().split("T")[0];
 }
 
-// ✅ Helper: Get last N days as date strings
+// Get last N days as ["2026-07-12", "2026-07-11", ...]
+// index 0 = today (most recent), last index = oldest
 function getLastNDays(n) {
   const dates = [];
   for (let i = 0; i < n; i++) {
@@ -207,11 +243,25 @@ function getLastNDays(n) {
   return dates;
 }
 
-// ✅ Helper: Format date nicely
+// "Dec 25, 2026" format
 function formatDate(date) {
   return date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
+  });
+}
+
+// ✅ NEW: "Jul 11" short format for breakdown labels
+// Input: "2026-07-11" string
+function formatDateShort(dateString) {
+  // Parse as UTC to avoid timezone shift
+  const [year, month, day] = dateString.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
   });
 }
