@@ -3,7 +3,7 @@ const Logger = require("../logger");
 
 const logger = new Logger("WelcomeMessage");
 
-const WELCOME_CHANNEL_ID = "1526253398863642797";
+const WELCOME_CHANNEL_ID = "1329979507884691506";
 
 const CHANNELS = {
   rules: "1506670308470423763",

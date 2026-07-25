@@ -14,6 +14,9 @@ const TRACKED_USERS = [
   {
     userId: "709084208378806324", // ѕℓαуєя user ID
   },
+  {
+    userId: "799922335913082892", // patham_0803 user ID
+  },
 ];
 
 class AmanTrumpetReminder {
