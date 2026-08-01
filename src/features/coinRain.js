@@ -16,12 +16,9 @@ class CoinRainFeature {
         message.content.trim().toUpperCase() === "CATCH"
       ) {
         // Check if there's an active coin rain in this channel
-        if (
-          this.activeRains &&
-          this.activeRains.has(message.channel.id)
-        ) {
+        if (this.activeRains && this.activeRains.has(message.channel.id)) {
           await message.channel.send(
-            "# Please convert your coins to gold bars!"
+            "# Please convert your coins to gold bars!\nUse `rpg cf h` in here https://discord.com/channels/894383235063222313/1531058054307516447",
           );
           return;
         }
@@ -62,7 +59,7 @@ class CoinRainFeature {
 
       const maxReward = parseInt(
         numbers[numbers.length - 1].replace(/,/g, ""),
-        10
+        10,
       );
       if (!maxReward || maxReward < 1_000_000_000_000) return;
 
@@ -77,7 +74,7 @@ class CoinRainFeature {
 
       // ✅ Send permanent convert reminder message
       await message.channel.send(
-        "# Please convert your coins to gold bars!"
+        "# Please convert your coins to gold bars!\nUse `rpg cf h` in here https://discord.com/channels/894383235063222313/1531058054307516447",
       );
 
       // ✅ Track active rain in this channel
@@ -93,7 +90,6 @@ class CoinRainFeature {
           this.activeRains.delete(message.channel.id);
         }
       }, 60000);
-
     } catch (err) {
       logger.error("CoinRain error:", err);
     }

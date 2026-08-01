@@ -19,11 +19,16 @@ module.exports = {
 
       setInterval(() => {
         const activities = [
-          { name: "Super donor GA in EPIC-BOTS", type: 3 },
-          { name: "EPIC-BOTS | Vibing 🎮", type: 0 },
-          { name: "🌧️ Coin Rains in EPIC-BOTS", type: 3 },
-          { name: "🎁 LootBox Events in EPIC-BOTS", type: 3 },
-          { name: "🤝 Invite your friends to EPIC-BOTS", type: 3 },
+          { name: "🎉 Super Donor GAs in EPIC-BOTS", type: 3 },
+          { name: "🌧️ Coin Rains Happening!", type: 3 },
+          { name: "🎁 Massive Summon Drops", type: 3 },
+          { name: "⚡ Epic Summon Events", type: 3 },
+          { name: "💎 Win Amazing Rewards", type: 3 },
+          { name: "🤝 Invite Friends & Earn Rewards", type: 3 },
+          { name: "💰 Gamble Responsibly in EPIC-BOTS", type: 3 },
+          { name: "🔥 Active Community Events", type: 3 },
+          { name: "🚀 Growing Every Day!", type: 3 },
+          { name: "✨ New Events Every Month", type: 3 },
         ];
         const randomActivity =
           activities[Math.floor(Math.random() * activities.length)];

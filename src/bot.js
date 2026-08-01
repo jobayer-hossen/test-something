@@ -15,6 +15,7 @@ const AmanCoinMention = require("./features/amanTrumpetReminder");
 const BaseManager = require("./features/baseManager");
 const TournamentManager = require("./features/tournamentManager");
 const CommandTrackerFeature = require("./features/commandTracker");
+const TimeTravelRolesFeature = require("./features/timeTravelRoles");
 
 const logger = new Logger("Bot");
 
@@ -515,6 +516,7 @@ class EpicRPGBot {
       this.client.features.commandTracker = new CommandTrackerFeature(this.client);
       this.client.features.welcomeMessage = new WelcomeMessageFeature(this.client);
       this.client.features.welcomeMessage.initialize();
+      this.client.features.timeTravelRoles = new TimeTravelRolesFeature(this.client);
 
       logger.info("✅ All features loaded");
     } catch (err) {

@@ -203,7 +203,7 @@ function buildRangeDescription(total, uniqueUsers, allUsers, days, last2Dates) {
 // ════════════════════════════════════════════
 function buildTodayDescription(stats, top10) {
   let description = `📊 **Total Usage:** ${stats.total.toLocaleString()}\n`;
-  description += `**🏆 Top 10 Users**\n\n`;
+  description += `**🏆 Today's Top Users**\n\n`;
 
   if (top10.length === 0) {
     description += "```\nNo usage recorded today yet!\n```";
