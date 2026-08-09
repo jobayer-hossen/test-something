@@ -1,8 +1,11 @@
 const Logger = require("../logger");
 const userService = require("../database/services/userService");
-const PersonalChannel = require("../database/schemas/PersonalChannel"); // Add this
+const PersonalChannel = require("../database/schemas/PersonalChannel");
 
 const logger = new Logger("MessageCreate");
+
+// ✅ Channel control commands (routed to channel.js)
+const CHANNEL_COMMANDS = ["lock", "unlock", "hide", "unhide", "slow"];
 
 module.exports = {
   name: "messageCreate",
@@ -11,7 +14,9 @@ module.exports = {
       if (!message.guild) return;
       if (message.author.id === client.user.id) return;
 
-      // Track user activity (XP)
+      // ════════════════════════════════════════
+      //         TRACK USER ACTIVITY
+      // ════════════════════════════════════════
       if (!message.author.bot) {
         try {
           await userService.getOrCreateUser(
@@ -21,22 +26,43 @@ module.exports = {
           );
           await userService.addXP(message.author.id, 1);
 
-          // --- ADDED: TRACK ROOM ACTIVITY ---
-          // This updates the 'lastActivity' date so the room doesn't get archived
           await PersonalChannel.findOneAndUpdate(
             { channelId: message.channel.id },
             { lastActivity: new Date() },
           ).catch(() => null);
-          // ----------------------------------
         } catch (error) {
           logger.debug("Error tracking user:", error.message);
         }
       }
 
-      const prefix = "eb";
+      const prefix       = "eb";
       const lowerContent = message.content.toLowerCase();
 
-      // Handle prefix commands
+      // ════════════════════════════════════════
+      //   NO-PREFIX CHANNEL CONTROL COMMANDS
+      //   Works: lock | LOCK | lock #general
+      // ════════════════════════════════════════
+      if (!message.author.bot) {
+        const firstWord = message.content.trim().split(/\s+/)[0].toLowerCase();
+
+        if (CHANNEL_COMMANDS.includes(firstWord)) {
+          const channelCommand = client.commands.get("lock"); // all handled by channel.js
+          if (channelCommand) {
+            try {
+              // ✅ Pass firstWord as the actual command name via args
+              const args = message.content.trim().split(/\s+/).slice(1);
+              await channelCommand.execute(message, args, client, firstWord);
+            } catch (error) {
+              logger.error(`Error executing channel command ${firstWord}:`, error.message);
+            }
+          }
+          return;
+        }
+      }
+
+      // ════════════════════════════════════════
+      //         PREFIX COMMANDS (eb ...)
+      // ════════════════════════════════════════
       if (lowerContent.startsWith(prefix + " ")) {
         const args = message.content
           .slice(prefix.length + 1)
@@ -44,16 +70,18 @@ module.exports = {
           .split(/ +/);
         const commandName = args.shift().toLowerCase();
 
-        const command = client.commands.get(commandName);
+        // ✅ Also support: eb lock | eb unlock | eb hide etc
+        const resolvedName = CHANNEL_COMMANDS.includes(commandName)
+          ? "lock"
+          : commandName;
+
+        const command = client.commands.get(resolvedName);
 
         if (command) {
           try {
-            await command.execute(message, args, client);
+            await command.execute(message, args, client, commandName);
           } catch (error) {
-            logger.error(
-              `Error executing command ${commandName}:`,
-              error.message,
-            );
+            logger.error(`Error executing command ${commandName}:`, error.message);
             await message.channel.send(
               "❌ An error occurred while executing this command!",
             );
@@ -61,9 +89,12 @@ module.exports = {
         }
       }
 
+      // ════════════════════════════════════════
+      //         MESSAGE TRIGGERS
+      // ════════════════════════════════════════
       try {
-        // Handle owner mentions
-        const ownerID = "782630678389981244";
+        // Owner mentions
+        const ownerID         = "782630678389981244";
         const isDirectMention =
           message.mentions.users.has(ownerID) &&
           message.reference === null &&
@@ -88,16 +119,13 @@ module.exports = {
             "https://cdn.discordapp.com/emojis/1469534191136936107.webp?size=96",
             "https://media.discordapp.net/stickers/1476422766755315855.webp?size=160&quality=lossless",
           ];
-          const randomSticker =
-            stickers[Math.floor(Math.random() * stickers.length)];
-
+          const randomSticker = stickers[Math.floor(Math.random() * stickers.length)];
           await message.channel.send({
-            content: randomSticker,
-            allowedMentions: { repliedUser: false },
+            content         : randomSticker,
+            allowedMentions : { repliedUser: false },
           });
         }
 
-        // Track Aman Trumpet usage
         if (client.features?.amanTrumpetReminder) {
           await client.features.amanTrumpetReminder.trackUsage(
             message.author.id,
@@ -105,7 +133,6 @@ module.exports = {
           );
         }
 
-        // Handle RPG features
         if (client.features?.coinRain) {
           client.features.coinRain.handleMessage(message);
         }
@@ -113,7 +140,7 @@ module.exports = {
         if (client.features?.LootBoxSummoningFeature) {
           client.features.LootBoxSummoningFeature.handleMessage(message);
         }
-        
+
         if (client.features?.commandTracker) {
           await client.features.commandTracker.handleMessage(message);
         }
@@ -121,9 +148,11 @@ module.exports = {
         if (client.features?.tournamentManager) {
           await client.features.tournamentManager.handleJoinWord(message);
         }
+
       } catch (error) {
         logger.error("Error processing message triggers:", error.message);
       }
+
     } catch (error) {
       logger.error("Critical error in messageCreate:", error.message);
     }

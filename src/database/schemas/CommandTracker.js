@@ -1,4 +1,3 @@
-// CommandTracker.js (Schema)
 const mongoose = require('mongoose');
 
 const commandTrackerSchema = new mongoose.Schema({
@@ -25,8 +24,14 @@ const commandTrackerSchema = new mongoose.Schema({
     default: 0
   },
   date: {
-    type: String,  // "2026-07-10" format
+    type: String,
     required: true,
+    index: true
+  },
+  // ✅ Track if userId is real Discord ID or fallback username
+  isResolved: {
+    type: Boolean,
+    default: true,
     index: true
   },
   createdAt: {

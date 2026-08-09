@@ -17,21 +17,17 @@ module.exports = {
   async execute(message, args, client) {
     try {
       const daysArg = args[0];
-      let days = 1; // Default: today only
+      let days = 1;
 
       if (daysArg) {
         const match = daysArg.match(/^(\d+)d$/i);
         if (match) {
           days = parseInt(match[1]);
           if (days < 1 || days > 365) {
-            return message.channel.send(
-              "❌ Please specify between 1d and 365d",
-            );
+            return message.channel.send("❌ Please specify between 1d and 365d");
           }
         } else {
-          return message.channel.send(
-            "❌ Invalid format. Use: `eb ct` or `eb ct 20d`",
-          );
+          return message.channel.send("❌ Invalid format. Use: `eb ct` or `eb ct 20d`");
         }
       }
 
@@ -40,6 +36,7 @@ module.exports = {
       } else {
         await sendRangeLeaderboard(message, COMMAND_INFO, days);
       }
+
     } catch (err) {
       logger.error("Error in ct command:", err);
       await message.channel.send("❌ Something went wrong. Please try again.");
@@ -48,7 +45,25 @@ module.exports = {
 };
 
 // ════════════════════════════════════════════
-//           TODAY'S LEADERBOARD
+// ✅ Get LIVE display name from Discord
+//    Always shows current nickname/name
+// ════════════════════════════════════════════
+async function resolveDisplayName(message, userId, fallbackName) {
+  try {
+    let member = message.guild.members.cache.get(userId);
+    if (!member) {
+      member = await message.guild.members.fetch(userId).catch(() => null);
+    }
+    if (member) {
+      return member.displayName || member.user.globalName || member.user.username;
+    }
+  } catch (e) {}
+  // User left server → use stored name from DB
+  return fallbackName;
+}
+
+// ════════════════════════════════════════════
+//   TODAY'S LEADERBOARD
 // ════════════════════════════════════════════
 async function sendTodayLeaderboard(message, commandInfo) {
   const today = getTodayString();
@@ -79,10 +94,22 @@ async function sendTodayLeaderboard(message, commandInfo) {
     .limit(10)
     .lean();
 
+  // ✅ Resolve live display names for all top10 users
+  const resolvedUsers = await Promise.all(
+    top10.map(async (user) => ({
+      ...user,
+      displayName: await resolveDisplayName(
+        message,
+        user.userId,
+        user.displayName || user.username
+      ),
+    }))
+  );
+
   const embed = new EmbedBuilder()
     .setColor(commandInfo.color)
     .setTitle(`${commandInfo.label} — Today's Leaderboard`)
-    .setDescription(buildTodayDescription(stats, top10))
+    .setDescription(buildTodayDescription(stats, resolvedUsers))
     .setFooter({ text: `📅 ${formatDate(new Date())}` })
     .setTimestamp();
 
@@ -90,17 +117,16 @@ async function sendTodayLeaderboard(message, commandInfo) {
 }
 
 // ════════════════════════════════════════════
-//        RANGE LEADERBOARD (X days)
+//   RANGE LEADERBOARD (X days)
 // ════════════════════════════════════════════
 async function sendRangeLeaderboard(message, commandInfo, days) {
   const dates = getLastNDays(days);
+  const last2Dates = dates.slice(0, 2);
 
   const allData = await CommandTracker.find({
     command: commandInfo.id,
     date: { $in: dates },
   }).lean();
-
-  const last2Dates = dates.slice(0, 2);
 
   const userMap = new Map();
 
@@ -108,7 +134,7 @@ async function sendRangeLeaderboard(message, commandInfo, days) {
     const existing = userMap.get(record.userId) || {
       userId: record.userId,
       username: record.username,
-      displayName: record.displayName,
+      displayName: record.displayName || record.username,
       total: 0,
       dailyBreakdown: {},
     };
@@ -116,31 +142,37 @@ async function sendRangeLeaderboard(message, commandInfo, days) {
     existing.total += record.count;
 
     if (last2Dates.includes(record.date)) {
-      existing.dailyBreakdown[record.date] = record.count;
+      existing.dailyBreakdown[record.date] =
+        (existing.dailyBreakdown[record.date] || 0) + record.count;
     }
 
     userMap.set(record.userId, existing);
   }
 
-  // ✅ ALL users sorted (no .slice(0, 10) limit)
   const allUsers = Array.from(userMap.values()).sort(
-    (a, b) => b.total - a.total,
+    (a, b) => b.total - a.total
   );
 
-  const totalUsage = allUsers.reduce((sum, user) => sum + user.total, 0);
+  // ✅ Resolve live display names for ALL users
+  const resolvedUsers = await Promise.all(
+    allUsers.map(async (user) => ({
+      ...user,
+      displayName: await resolveDisplayName(
+        message,
+        user.userId,
+        user.displayName || user.username
+      ),
+    }))
+  );
+
+  const totalUsage = resolvedUsers.reduce((sum, user) => sum + user.total, 0);
   const uniqueUsers = userMap.size;
 
   const embed = new EmbedBuilder()
     .setColor(commandInfo.color)
     .setTitle(`${commandInfo.label} — Last ${days} Days`)
     .setDescription(
-      buildRangeDescription(
-        totalUsage,
-        uniqueUsers,
-        allUsers,
-        days,
-        last2Dates,
-      ),
+      buildRangeDescription(totalUsage, uniqueUsers, resolvedUsers, days, last2Dates)
     )
     .setFooter({
       text: `📅 ${formatDate(new Date(dates[dates.length - 1]))} to ${formatDate(new Date())} • ${uniqueUsers} user(s)`,
@@ -151,12 +183,11 @@ async function sendRangeLeaderboard(message, commandInfo, days) {
 }
 
 // ════════════════════════════════════════════
-//        BUILD RANGE DESCRIPTION
+//   BUILD RANGE DESCRIPTION
 // ════════════════════════════════════════════
 function buildRangeDescription(total, uniqueUsers, allUsers, days, last2Dates) {
   let description = `📊 **Total Usage:** ${total.toLocaleString()}\n`;
-  // ✅ Show "All X Users" instead of "Top 10 Users"
-  description += `**🏆 All ${uniqueUsers} User${uniqueUsers !== 1 ? "s" : ""}**\n\n`;
+  description += `**🏆 All User **\n\n`;
 
   if (allUsers.length === 0) {
     description += "```\nNo usage recorded in this period!\n```";
@@ -164,20 +195,17 @@ function buildRangeDescription(total, uniqueUsers, allUsers, days, last2Dates) {
   }
 
   const medals = ["🥇", "🥈", "🥉"];
-
   const dateLabel0 = formatDateShort(last2Dates[0]);
   const dateLabel1 = last2Dates[1] ? formatDateShort(last2Dates[1]) : null;
 
   allUsers.forEach((user, index) => {
     const medal = medals[index] || `\`${String(index + 1).padStart(2, "0")}\``;
-    const name = (user.displayName || user.username).substring(0, 20);
+    const name = user.displayName.substring(0, 20);
     const totalCount = user.total.toLocaleString();
 
     let breakdown = "";
-
     if (last2Dates.length >= 1) {
       const count0 = user.dailyBreakdown[last2Dates[0]] || 0;
-
       if (last2Dates.length >= 2 && dateLabel1) {
         const count1 = user.dailyBreakdown[last2Dates[1]] || 0;
         breakdown = ` _(${dateLabel0}: **${count0.toLocaleString()}** | ${dateLabel1}: **${count1.toLocaleString()}**)_`;
@@ -189,17 +217,15 @@ function buildRangeDescription(total, uniqueUsers, allUsers, days, last2Dates) {
     description += `${medal} **${name}** — 🪥**${totalCount}**${breakdown}\n`;
   });
 
-  // ✅ Discord embed description limit is 4096 chars - warn if close
   if (description.length > 3900) {
-    description =
-      description.substring(0, 3900) + "\n`... and more (too many to display)`";
+    description = description.substring(0, 3900) + "\n`... and more (too many to display)`";
   }
 
   return description;
 }
 
 // ════════════════════════════════════════════
-//         BUILD TODAY DESCRIPTION
+//   BUILD TODAY DESCRIPTION
 // ════════════════════════════════════════════
 function buildTodayDescription(stats, top10) {
   let description = `📊 **Total Usage:** ${stats.total.toLocaleString()}\n`;
@@ -214,8 +240,7 @@ function buildTodayDescription(stats, top10) {
 
   top10.forEach((user, index) => {
     const medal = medals[index] || `\`${String(index + 1).padStart(2, "0")}\``;
-    const name = (user.displayName || user.username).substring(0, 20);
-
+    const name = user.displayName.substring(0, 20);
     description += `${medal} **${name}** — 🪥**${user.count.toLocaleString()}**\n`;
   });
 
@@ -223,16 +248,12 @@ function buildTodayDescription(stats, top10) {
 }
 
 // ════════════════════════════════════════════
-//              DATE HELPERS
+//   DATE HELPERS
 // ════════════════════════════════════════════
-
-// "2026-07-11" → today's date string
 function getTodayString() {
   return new Date().toISOString().split("T")[0];
 }
 
-// Get last N days as ["2026-07-12", "2026-07-11", ...]
-// index 0 = today (most recent), last index = oldest
 function getLastNDays(n) {
   const dates = [];
   for (let i = 0; i < n; i++) {
@@ -243,7 +264,6 @@ function getLastNDays(n) {
   return dates;
 }
 
-// "Dec 25, 2026" format
 function formatDate(date) {
   return date.toLocaleDateString("en-US", {
     month: "short",
@@ -252,13 +272,9 @@ function formatDate(date) {
   });
 }
 
-// ✅ NEW: "Jul 11" short format for breakdown labels
-// Input: "2026-07-11" string
 function formatDateShort(dateString) {
-  // Parse as UTC to avoid timezone shift
   const [year, month, day] = dateString.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
-
   return date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",

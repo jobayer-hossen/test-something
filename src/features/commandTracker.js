@@ -9,18 +9,10 @@ const TRACKED_COMMANDS = [
   {
     id: 'legendary_toothbrush',
     label: 'Legendary Toothbrush',
-    // ✅ Matches plain text OR custom Discord emoji (<:name:id>)
     patterns: [
       /casts a magic spell with the .*?legendary toothbrush/i
     ]
   },
-  // {
-  //   id: 'coin_trumpet',
-  //   label: 'Coin Trumpet',
-  //   patterns: [
-  //     /plays a trumpet made of coins/i
-  //   ]
-  // }
 ];
 
 function getTodayString() {
@@ -32,25 +24,24 @@ class CommandTrackerFeature {
     this.client = client;
   }
 
-  // ✅ Step 1: Parse the message from Epic RPG
+  // ════════════════════════════════════════════
+  // STEP 1: Check if Epic RPG message matches
+  // ════════════════════════════════════════════
   parseEpicRPGMessage(message) {
-    // Only listen to Epic RPG bot
     if (message.author.id !== EPIC_RPG_BOT_ID) return null;
     if (!message.content) return null;
 
-    const content = message.content.trim();
-    const firstLine = content.split('\n')[0];
+    const firstLine = message.content.trim().split('\n')[0];
 
     for (const cmd of TRACKED_COMMANDS) {
       for (const pattern of cmd.patterns) {
         if (pattern.test(firstLine)) {
-          // ✅ Extracts "ichigo271" from "ichigo271 casts a magic spell..."
           const usernameMatch = firstLine.match(/^(.+?)\s+(casts|plays|uses)/i);
-          
           if (usernameMatch) {
             return {
               command: cmd,
-              username: usernameMatch[1].replace(/[*_`~]/g, '').trim(), // Clean formatting
+              // Raw display name from message text
+              displayNameFromMessage: usernameMatch[1].replace(/[*_`~]/g, '').trim(),
               mentionedUser: message.mentions.users.first() || null
             };
           }
@@ -60,78 +51,104 @@ class CommandTrackerFeature {
     return null;
   }
 
-  // ✅ Step 2: Try to get User ID from Reply/Interaction Reference
-  async getUserFromContext(message, username) {
-    // 1. Check if it's a reply to a user's command
-    if (message.reference && message.reference.messageId) {
+  // ════════════════════════════════════════════
+  // STEP 2: Resolve real Discord User
+  // Priority: mention → reply → full guild search
+  // ════════════════════════════════════════════
+  async resolveUser(message, displayNameFromMessage) {
+    // ✅ Priority 1: Direct mention in message (@user)
+    if (message.mentions.users.size > 0) {
+      return message.mentions.users.first();
+    }
+
+    // ✅ Priority 2: Epic RPG replied to user's message
+    if (message.reference?.messageId) {
       try {
         const refMsg = await message.channel.messages.fetch(message.reference.messageId);
-        if (refMsg && !refMsg.author.bot) return refMsg.author;
+        if (refMsg && !refMsg.author.bot) {
+          return refMsg.author;
+        }
       } catch (err) {}
     }
 
-    // 2. Check interaction (if user used a slash command)
-    if (message.interaction && message.interaction.user) {
-      return message.interaction.user;
-    }
-
-    // 3. Check guild cache by exact Username or Display Name
-    const member = message.guild.members.cache.find(
-      m => m.user.username.toLowerCase() === username.toLowerCase() ||
-           m.displayName.toLowerCase() === username.toLowerCase()
-    );
-    if (member) return member.user;
-
-    // 4. Force fetch from Discord API if not in cache
+    // ✅ Priority 3: Search ALL guild members by display name
     try {
-      const fetchedMembers = await message.guild.members.fetch({ query: username, limit: 1 });
-      const firstFound = fetchedMembers.first();
-      if (firstFound) return firstFound.user;
-    } catch (err) {}
+      // Fetch all members into cache
+      await message.guild.members.fetch();
+
+      const cleanName = displayNameFromMessage.toLowerCase();
+
+      const member = message.guild.members.cache.find(m =>
+        m.user.username.toLowerCase() === cleanName ||
+        m.displayName.toLowerCase() === cleanName ||
+        (m.user.globalName && m.user.globalName.toLowerCase() === cleanName) ||
+        (m.nickname && m.nickname.toLowerCase() === cleanName)
+      );
+
+      if (member) return member.user;
+    } catch (err) {
+      logger.error('Guild member fetch failed:', err);
+    }
 
     return null;
   }
 
-  // ✅ Step 3: Main Listener (Works in ANY channel of the server)
+  // ════════════════════════════════════════════
+  // STEP 3: Main handler
+  // ════════════════════════════════════════════
   async handleMessage(message) {
     try {
-      // Must be in a guild (server) and sent by Epic RPG
       if (!message.inGuild()) return;
       if (message.author.id !== EPIC_RPG_BOT_ID) return;
 
-      // Check if the message matches our pattern
       const parsed = this.parseEpicRPGMessage(message);
       if (!parsed) return;
 
-      // Identify the user who used it
-      let user = parsed.mentionedUser || await this.getUserFromContext(message, parsed.username);
-
       const today = getTodayString();
-      const userId = user ? user.id : `unknown_${parsed.username.toLowerCase()}`;
-      const username = user ? user.username : parsed.username;
-      const displayName = user && message.guild.members.cache.get(user.id)?.displayName 
-        ? message.guild.members.cache.get(user.id).displayName 
-        : parsed.username;
 
-      // Save to database permanently & increment count
+      // ✅ Resolve real Discord user
+      const user = await this.resolveUser(message, parsed.displayNameFromMessage);
+
+      if (!user) {
+        // ─────────────────────────────────────────
+        // Could NOT resolve → skip storing
+        // No more unknown_ garbage in DB
+        // ─────────────────────────────────────────
+        logger.warn(`⚠️ [SKIPPED] Could not resolve user for: "${parsed.displayNameFromMessage}" — not stored`);
+        return;
+      }
+
+      // ─────────────────────────────────────────
+      // ✅ Resolved → Get latest display name from guild
+      // ─────────────────────────────────────────
+      const member = message.guild.members.cache.get(user.id);
+      const latestDisplayName = member?.displayName || user.globalName || user.username;
+
+      // ─────────────────────────────────────────
+      // ✅ Store/Update DB
+      // userId NEVER changes (real Discord ID)
+      // username NEVER changes (Discord username)
+      // displayName ALWAYS updates to latest
+      // count increments
+      // ─────────────────────────────────────────
       const result = await CommandTracker.findOneAndUpdate(
         {
-          userId: userId,
+          userId: user.id,          // Real Discord ID — permanent key
           command: parsed.command.id,
           date: today
         },
         {
           $inc: { count: 1 },
           $set: {
-            username: username,
-            displayName: displayName,
+            username: user.username,           // Discord username (rarely changes)
+            displayName: latestDisplayName,    // Server nickname (always latest)
             lastUpdated: new Date()
           }
         },
         { upsert: true, new: true }
       );
 
-      // logger.info(`✅ [TRACKED] ${displayName} (${userId}) used ${parsed.command.label} on ${today} -> Total today: ${result.count}`);
+      logger.info(`✅ [TRACKED] ${latestDisplayName} (${user.id}) used ${parsed.command.label} on ${today} → Total: ${result.count}`);
 
     } catch (err) {
       logger.error('Error in CommandTracker handleMessage:', err);

@@ -32,7 +32,7 @@ const TT_ROLES = [
   },
 ];
 
-const EPIC_RPG_BOT_ID    = "555955826880413696";
+const EPIC_RPG_BOT_ID = "555955826880413696";
 const PROFILE_CHANNEL_ID = "1532062090490019990";
 
 // ════════════════════════════════════════════
@@ -62,10 +62,10 @@ class TimeTravelRolesFeature {
   async handleMessage(message) {
     try {
       if (message.channelId !== PROFILE_CHANNEL_ID) return;
-      if (message.author.id !== EPIC_RPG_BOT_ID)    return;
-      if (!message.embeds?.length)                   return;
+      if (message.author.id !== EPIC_RPG_BOT_ID) return;
+      if (!message.embeds?.length) return;
 
-      const embed      = message.embeds[0];
+      const embed = message.embeds[0];
       const authorName = embed.author?.name || "";
 
       if (!authorName.toLowerCase().includes("profile")) return;
@@ -76,10 +76,13 @@ class TimeTravelRolesFeature {
       const member = await this.findProfileUser(message, authorName);
       if (!member) return;
 
-      const result = await this.assignTimeTravelRole(member, timeTravels, message.guild);
+      const result = await this.assignTimeTravelRole(
+        member,
+        timeTravels,
+        message.guild,
+      );
 
       await this.sendReply(message, member, timeTravels, result);
-
     } catch (err) {
       logger.error("handleMessage error:", err);
     }
@@ -93,8 +96,13 @@ class TimeTravelRolesFeature {
       // Primary: PROGRESS field
       for (const field of embed.fields || []) {
         if (field.name !== "PROGRESS") continue;
-        const match = field.value.match(/\*\*Time travels\*\*\s*:\s*(\d+)/i);
-        if (match) return parseInt(match[1]);
+
+        // ✅ FIX: Match numbers with commas like 17,640,220
+        const match = field.value.match(/\*\*Time travels\*\*\s*:\s*([\d,]+)/i);
+        if (match) {
+          // Remove commas before parsing → "17,640,220" → 17640220
+          return parseInt(match[1].replace(/,/g, ""));
+        }
       }
 
       // Fallback: search all text
@@ -103,9 +111,11 @@ class TimeTravelRolesFeature {
         ...(embed.fields || []).map((f) => `${f.name}\n${f.value}`),
       ].join("\n");
 
-      const match = allText.match(/time\s*travels?\*\*?\s*[:\-]\s*\*?\*?(\d+)/i);
-      return match ? parseInt(match[1]) : null;
-
+      // ✅ FIX: Also handle commas in fallback
+      const match = allText.match(
+        /time\s*travels?\*\*?\s*[:\-]\s*\*?\*?([\d,]+)/i,
+      );
+      return match ? parseInt(match[1].replace(/,/g, "")) : null;
     } catch (err) {
       logger.error("extractTimeTravels error:", err);
       return null;
@@ -128,7 +138,7 @@ class TimeTravelRolesFeature {
       for (const [, msg] of messages) {
         if (msg.author.bot) continue;
 
-        const content      = msg.content.toLowerCase().trim();
+        const content = msg.content.toLowerCase().trim();
         const isProfileCmd = profileCommands.some(
           (cmd) => content === cmd || content.startsWith(cmd + " "),
         );
@@ -143,7 +153,6 @@ class TimeTravelRolesFeature {
 
       // Method 2: Match by author name
       return await this.findUserByAuthorName(epicRpgMessage, authorName);
-
     } catch (err) {
       logger.error("findProfileUser error:", err);
       return null;
@@ -162,18 +171,19 @@ class TimeTravelRolesFeature {
 
       await message.guild.members.fetch();
 
-      return message.guild.members.cache.find((m) => {
-        const checks = [
-          m.user.username.toLowerCase(),
-          m.user.globalName?.toLowerCase() || "",
-          m.displayName.toLowerCase(),
-          m.nickname?.toLowerCase() || "",
-        ];
-        return checks.some(
-          (c) => c === target || c.includes(target) || target.includes(c),
-        );
-      }) || null;
-
+      return (
+        message.guild.members.cache.find((m) => {
+          const checks = [
+            m.user.username.toLowerCase(),
+            m.user.globalName?.toLowerCase() || "",
+            m.displayName.toLowerCase(),
+            m.nickname?.toLowerCase() || "",
+          ];
+          return checks.some(
+            (c) => c === target || c.includes(target) || target.includes(c),
+          );
+        }) || null
+      );
     } catch (err) {
       logger.error("findUserByAuthorName error:", err);
       return null;
@@ -185,14 +195,14 @@ class TimeTravelRolesFeature {
   // ════════════════════════════════════════════
   async assignTimeTravelRole(member, timeTravels, guild) {
     const result = {
-      success:    false,
-      action:     null,
+      success: false,
+      action: null,
       targetTier: null,
-      error:      null,
+      error: null,
     };
 
     try {
-      const targetTier   = TT_ROLES.find(
+      const targetTier = TT_ROLES.find(
         (t) => timeTravels >= t.min && timeTravels <= t.max,
       );
       const allTtRoleIds = TT_ROLES.map((t) => t.roleId);
@@ -210,7 +220,7 @@ class TimeTravelRolesFeature {
             "TT count is 0",
           );
         }
-        result.action  = "removed_all";
+        result.action = "removed_all";
         result.success = true;
         return result;
       }
@@ -226,7 +236,7 @@ class TimeTravelRolesFeature {
 
       // Already has correct role
       if (member.roles.cache.has(targetTier.roleId)) {
-        result.action  = "already_has";
+        result.action = "already_has";
         result.success = true;
         return result;
       }
@@ -234,7 +244,7 @@ class TimeTravelRolesFeature {
       // Add correct role
       if (!guild.roles.cache.has(targetTier.roleId)) {
         result.action = "error";
-        result.error  = `Role \`${targetTier.roleId}\` not found in guild`;
+        result.error = `Role \`${targetTier.roleId}\` not found in guild`;
         return result;
       }
 
@@ -243,15 +253,15 @@ class TimeTravelRolesFeature {
         `TT: ${timeTravels} → ${targetTier.label}`,
       );
 
-      result.action  = "added";
+      result.action = "added";
       result.success = true;
       return result;
-
     } catch (err) {
       result.action = "error";
-      result.error  = err.code === 50013
-        ? "Missing permissions — move bot role above TT roles"
-        : err.message;
+      result.error =
+        err.code === 50013
+          ? "Missing permissions — move bot role above TT roles"
+          : err.message;
       return result;
     }
   }
@@ -276,9 +286,7 @@ class TimeTravelRolesFeature {
       }
 
       // ✅ Tier text
-      const tierText = tier
-        ? `${tier.emoji} ${tier.label}`
-        : "—";
+      const tierText = tier ? `${tier.emoji} ${tier.label}` : "—";
 
       const embed = new EmbedBuilder()
         .setColor(EMBED_COLOR)
@@ -293,7 +301,6 @@ class TimeTravelRolesFeature {
         );
 
       await epicRpgMessage.reply({ embeds: [embed] });
-
     } catch (err) {
       logger.error("sendReply error:", err);
     }
