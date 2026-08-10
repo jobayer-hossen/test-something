@@ -35,7 +35,7 @@ module.exports = {
         }
       }
 
-      const prefix       = "eb";
+      const prefix = "eb";
       const lowerContent = message.content.toLowerCase();
 
       // ════════════════════════════════════════
@@ -53,7 +53,10 @@ module.exports = {
               const args = message.content.trim().split(/\s+/).slice(1);
               await channelCommand.execute(message, args, client, firstWord);
             } catch (error) {
-              logger.error(`Error executing channel command ${firstWord}:`, error.message);
+              logger.error(
+                `Error executing channel command ${firstWord}:`,
+                error.message,
+              );
             }
           }
           return;
@@ -81,7 +84,10 @@ module.exports = {
           try {
             await command.execute(message, args, client, commandName);
           } catch (error) {
-            logger.error(`Error executing command ${commandName}:`, error.message);
+            logger.error(
+              `Error executing command ${commandName}:`,
+              error.message,
+            );
             await message.channel.send(
               "❌ An error occurred while executing this command!",
             );
@@ -94,7 +100,7 @@ module.exports = {
       // ════════════════════════════════════════
       try {
         // Owner mentions
-        const ownerID         = "782630678389981244";
+        const ownerID = "782630678389981244";
         const isDirectMention =
           message.mentions.users.has(ownerID) &&
           message.reference === null &&
@@ -119,10 +125,11 @@ module.exports = {
             "https://cdn.discordapp.com/emojis/1469534191136936107.webp?size=96",
             "https://media.discordapp.net/stickers/1476422766755315855.webp?size=160&quality=lossless",
           ];
-          const randomSticker = stickers[Math.floor(Math.random() * stickers.length)];
+          const randomSticker =
+            stickers[Math.floor(Math.random() * stickers.length)];
           await message.channel.send({
-            content         : randomSticker,
-            allowedMentions : { repliedUser: false },
+            content: randomSticker,
+            allowedMentions: { repliedUser: false },
           });
         }
 
@@ -149,10 +156,13 @@ module.exports = {
           await client.features.tournamentManager.handleJoinWord(message);
         }
 
+        if (client.features.beachPartyFeature) {
+          await client.features.beachPartyFeature.handleMessage(message);
+        }
+
       } catch (error) {
         logger.error("Error processing message triggers:", error.message);
       }
-
     } catch (error) {
       logger.error("Critical error in messageCreate:", error.message);
     }

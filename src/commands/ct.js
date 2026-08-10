@@ -44,10 +44,7 @@ module.exports = {
   },
 };
 
-// ════════════════════════════════════════════
 // ✅ Get LIVE display name from Discord
-//    Always shows current nickname/name
-// ════════════════════════════════════════════
 async function resolveDisplayName(message, userId, fallbackName) {
   try {
     let member = message.guild.members.cache.get(userId);
@@ -55,16 +52,14 @@ async function resolveDisplayName(message, userId, fallbackName) {
       member = await message.guild.members.fetch(userId).catch(() => null);
     }
     if (member) {
+      // ✅ Always return CURRENT display name (not stored one)
       return member.displayName || member.user.globalName || member.user.username;
     }
   } catch (e) {}
-  // User left server → use stored name from DB
   return fallbackName;
 }
 
-// ════════════════════════════════════════════
-//   TODAY'S LEADERBOARD
-// ════════════════════════════════════════════
+// TODAY'S LEADERBOARD
 async function sendTodayLeaderboard(message, commandInfo) {
   const today = getTodayString();
 
@@ -94,7 +89,7 @@ async function sendTodayLeaderboard(message, commandInfo) {
     .limit(10)
     .lean();
 
-  // ✅ Resolve live display names for all top10 users
+  // ✅ Resolve LIVE display names
   const resolvedUsers = await Promise.all(
     top10.map(async (user) => ({
       ...user,
@@ -116,9 +111,7 @@ async function sendTodayLeaderboard(message, commandInfo) {
   await message.channel.send({ embeds: [embed] });
 }
 
-// ════════════════════════════════════════════
-//   RANGE LEADERBOARD (X days)
-// ════════════════════════════════════════════
+// RANGE LEADERBOARD (X days)
 async function sendRangeLeaderboard(message, commandInfo, days) {
   const dates = getLastNDays(days);
   const last2Dates = dates.slice(0, 2);
@@ -128,6 +121,7 @@ async function sendRangeLeaderboard(message, commandInfo, days) {
     date: { $in: dates },
   }).lean();
 
+  // ✅ Group by userId (ONLY userId, not displayName)
   const userMap = new Map();
 
   for (const record of allData) {
@@ -153,7 +147,7 @@ async function sendRangeLeaderboard(message, commandInfo, days) {
     (a, b) => b.total - a.total
   );
 
-  // ✅ Resolve live display names for ALL users
+  // ✅ Resolve LIVE display names for ALL users
   const resolvedUsers = await Promise.all(
     allUsers.map(async (user) => ({
       ...user,
@@ -182,12 +176,10 @@ async function sendRangeLeaderboard(message, commandInfo, days) {
   await message.channel.send({ embeds: [embed] });
 }
 
-// ════════════════════════════════════════════
-//   BUILD RANGE DESCRIPTION
-// ════════════════════════════════════════════
+// BUILD RANGE DESCRIPTION
 function buildRangeDescription(total, uniqueUsers, allUsers, days, last2Dates) {
   let description = `📊 **Total Usage:** ${total.toLocaleString()}\n`;
-  description += `**🏆 All User **\n\n`;
+  description += `**🏆 All ${uniqueUsers} User${uniqueUsers !== 1 ? "s" : ""}**\n\n`;
 
   if (allUsers.length === 0) {
     description += "```\nNo usage recorded in this period!\n```";
@@ -224,9 +216,7 @@ function buildRangeDescription(total, uniqueUsers, allUsers, days, last2Dates) {
   return description;
 }
 
-// ════════════════════════════════════════════
-//   BUILD TODAY DESCRIPTION
-// ════════════════════════════════════════════
+// BUILD TODAY DESCRIPTION
 function buildTodayDescription(stats, top10) {
   let description = `📊 **Total Usage:** ${stats.total.toLocaleString()}\n`;
   description += `**🏆 Today's Top Users**\n\n`;
@@ -247,9 +237,7 @@ function buildTodayDescription(stats, top10) {
   return description;
 }
 
-// ════════════════════════════════════════════
-//   DATE HELPERS
-// ════════════════════════════════════════════
+// DATE HELPERS
 function getTodayString() {
   return new Date().toISOString().split("T")[0];
 }
