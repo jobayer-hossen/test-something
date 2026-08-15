@@ -25,10 +25,8 @@ const commandTrackerSchema = new mongoose.Schema({
   },
   date: {
     type: String,
-    required: true,
     index: true
   },
-  // ✅ Track if userId is real Discord ID or fallback username
   isResolved: {
     type: Boolean,
     default: true,

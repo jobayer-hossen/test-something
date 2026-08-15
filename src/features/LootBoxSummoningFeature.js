@@ -35,7 +35,8 @@ class LootBoxSummoningFeature {
 
       // 🚀 Send without awaiting the delete (fire and forget)
       const sent = await message.channel.send({
-        content: `<@&${this.roleId}> If you want EDGY! then type **SUMMON**!`,
+        // content: `<@&${this.roleId}> If you want EDGY! then type **SUMMON**!`,
+        content: `If you want EDGY! then type **SUMMON**!`,
         allowedMentions: { parse: ["roles"] },
       });
 

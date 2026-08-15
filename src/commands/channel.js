@@ -16,6 +16,14 @@ const ALLOWED_CONTROLS = [
       // "1234567890123456789", // Role 2 ← add more roles here
     ],
   },
+  {
+    // Control channel 1
+    channelId : "1538104045091430412",
+    roleIds   : [
+      "1524850447050084452", // Role 1
+      // "1234567890123456789", // Role 2 ← add more roles here
+    ],
+  },
   // ✅ Add more control channels below:
   // {
   //   channelId : "1234567890123456789",  // Another control channel

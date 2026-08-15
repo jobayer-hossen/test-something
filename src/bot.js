@@ -16,6 +16,7 @@ const BaseManager = require("./features/baseManager");
 const TournamentManager = require("./features/tournamentManager");
 const CommandTrackerFeature = require("./features/commandTracker");
 const TimeTravelRolesFeature = require("./features/timeTravelRoles");
+const MessageSnapshotFeature = require("./features/messageSnapshotFeature");
 
 const BeachPartyFeature = require("./features/BeachPartyFeature");
 
@@ -519,6 +520,7 @@ class EpicRPGBot {
       this.client.features.welcomeMessage = new WelcomeMessageFeature(this.client);
       this.client.features.welcomeMessage.initialize();
       this.client.features.timeTravelRoles = new TimeTravelRolesFeature(this.client);
+      this.client.features.messageSnapshot = new MessageSnapshotFeature(this.client);
       this.client.features.beachPartyFeature = new BeachPartyFeature(this.client);
 
       logger.info("✅ All features loaded");

@@ -5,172 +5,127 @@ const logger = new Logger('CommandTracker');
 
 const EPIC_RPG_BOT_ID = '555955826880413696';
 
-const TRACKED_COMMANDS = [
-  {
-    id: 'legendary_toothbrush',
-    label: 'Legendary Toothbrush',
-    triggerPatterns: [
-      /^rpg\s+use\s+legendary\s+toothbrush/i,
-      /^rpg\s+u\s+legendary\s+toothbrush/i,
-    ],
-    responsePatterns: [
-      /casts a magic spell with the .*?legendary toothbrush/i
-    ]
-  },
-];
-
 function getTodayString() {
   return new Date().toISOString().split('T')[0];
-}
-
-function normalizeName(str) {
-  return str
-    .toLowerCase()
-    .replace(/[*_`~.\s]/g, '')
-    .trim();
 }
 
 class CommandTrackerFeature {
   constructor(client) {
     this.client = client;
     
-    this.commandQueue = [];
-    // ✅ Track recently counted (userId_commandId → timestamp)
-    this.recentlyTracked = new Map();
+    // ✅ epicRPGName → { userId, username, displayName }
+    this.userCache = new Map();
+    
+    // ✅ Track processed Epic RPG message IDs (prevent double count)
+    this.processedMessages = new Set();
 
+    // Clean processed messages every 5 minutes
     setInterval(() => {
-      const now = Date.now();
-      const oldSize = this.commandQueue.length;
-      this.commandQueue = this.commandQueue.filter(
-        item => (now - item.timestamp) < 30000
-      );
-      if (oldSize > this.commandQueue.length) {
-        logger.info(`🧹 Queue cleaned: ${oldSize} → ${this.commandQueue.length}`);
-      }
-
-      // ✅ Clean recentlyTracked (older than 1 second)
-      for (const [key, timestamp] of this.recentlyTracked.entries()) {
-        if (now - timestamp > 1000) {
-          this.recentlyTracked.delete(key);
-        }
-      }
-    }, 10000);
+      this.processedMessages.clear();
+    }, 300000);
   }
 
-  handleUserMessage(message) {
+  // ════════════════════════════════════════════
+  // User types "rpg use legendary toothbrush"
+  // Get userId, username, displayName — store ONCE
+  // ════════════════════════════════════════════
+  async handleUserMessage(message) {
     if (message.author.bot) return;
 
     const content = message.content.trim();
 
-    for (const cmd of TRACKED_COMMANDS) {
-      for (const trigger of cmd.triggerPatterns) {
-        if (trigger.test(content)) {
-          this.commandQueue.push({
-            userId: message.author.id,
-            username: message.author.username,
-            displayName: message.member?.displayName || message.author.globalName || message.author.username,
-            timestamp: Date.now(),
-            commandId: cmd.id
-          });
+    if (!/^rpg\s+use\s+legendary\s+toothbrush/i.test(content) &&
+        !/^rpg\s+u\s+legendary\s+toothbrush/i.test(content)) return;
 
-          // logger.info(`📝 [QUEUED] ${message.author.username} | Queue: ${this.commandQueue.length}`);
-          return;
-        }
-      }
+    const userId = message.author.id;
+    const username = message.author.username;
+    const displayName = message.member?.displayName || message.author.globalName || message.author.username;
+
+    // logger.info(`👤 [USER] ${username} (${userId})`);
+
+    // ✅ Already in cache — do nothing
+    if (this.userCache.has(username)) return;
+
+    // ✅ Check DB — does this userId already exist?
+    const existing = await CommandTracker.findOne({ userId }).lean();
+
+    if (existing) {
+      this.userCache.set(username, { userId, username, displayName });
+      // logger.info(`✅ [LOADED] ${username} from DB`);
+      return;
     }
+
+    // ✅ New user — save to cache
+    this.userCache.set(username, { userId, username, displayName });
+    // logger.info(`🆕 [NEW] ${username} (${userId}) cached`);
   }
 
+  // ════════════════════════════════════════════
+  // Epic RPG sends success response — count it
+  // ════════════════════════════════════════════
   async handleEpicRPGMessage(message) {
     if (message.author.id !== EPIC_RPG_BOT_ID) return;
     if (!message.content) return;
 
-    const firstLine = message.content.trim().split('\n')[0];
+    const content = message.content.trim();
 
-    let matchedCmd = null;
-    for (const cmd of TRACKED_COMMANDS) {
-      for (const pattern of cmd.responsePatterns) {
-        if (pattern.test(firstLine)) {
-          matchedCmd = cmd;
-          break;
-        }
-      }
-      if (matchedCmd) break;
-    }
+    // ✅ Only count this exact response
+    if (!content.includes('casts a magic spell')) return;
+    if (!content.includes('legendary toothbrush')) return;
 
-    if (!matchedCmd) return;
+    // ✅ Skip if already processed this message
+    if (this.processedMessages.has(message.id)) return;
+    this.processedMessages.add(message.id);
 
-    const nameMatch = firstLine.match(/^(.+?)\s+(casts|plays|uses)/i);
+    // ✅ Extract username — DO NOT strip underscores
+    // RPG sends: **braty_n** casts a magic spell...
+    // We extract: braty_n (with underscore)
+    const nameMatch = content.match(/^\*?\*?(.+?)\*?\*?\s+casts/i);
     if (!nameMatch) return;
 
-    const epicRPGName = nameMatch[1].replace(/[*_`~]/g, '').trim();
-    const epicRPGNameNorm = normalizeName(epicRPGName);
+    // ✅ Only strip bold/italic markdown (* and **), NOT underscores
+    const epicRPGName = nameMatch[1].replace(/\*/g, '').trim();
 
-    let bestMatch = null;
-    let bestScore = -1;
+    // logger.info(`📨 [RPG] "${epicRPGName}" | msgId: ${message.id}`);
 
-    for (const queued of this.commandQueue) {
-      if (queued.commandId !== matchedCmd.id) continue;
+    // ✅ Look up user by username
+    let userData = this.userCache.get(epicRPGName);
 
-      const queuedDisplayNorm = normalizeName(queued.displayName);
-      const queuedUsernameNorm = normalizeName(queued.username);
+    if (!userData) {
+      // ✅ Not in cache — search DB by username
+      const dbUser = await CommandTracker.findOne({ username: epicRPGName }).lean();
 
-      let nameScore = 0;
-      if (queuedDisplayNorm === epicRPGNameNorm) nameScore = 100;
-      else if (queuedUsernameNorm === epicRPGNameNorm) nameScore = 100;
-      else if (queuedDisplayNorm.includes(epicRPGNameNorm) || epicRPGNameNorm.includes(queuedDisplayNorm)) nameScore = 80;
-      else if (queuedUsernameNorm.includes(epicRPGNameNorm) || epicRPGNameNorm.includes(queuedUsernameNorm)) nameScore = 80;
-      else continue;
-
-      const timeDiffMs = Date.now() - queued.timestamp;
-      const recencyScore = Math.max(0, 100 - (timeDiffMs / 1000));
-
-      const totalScore = nameScore + recencyScore;
-
-      if (totalScore > bestScore) {
-        bestScore = totalScore;
-        bestMatch = queued;
+      if (dbUser) {
+        userData = {
+          userId: dbUser.userId,
+          username: dbUser.username,
+          displayName: dbUser.displayName
+        };
+        this.userCache.set(epicRPGName, userData);
+        // logger.info(`✅ [DB FOUND] ${epicRPGName} → ${userData.userId}`);
+      } else {
+        logger.warn(`⚠️ [NOT FOUND] "${epicRPGName}" — waiting for user trigger`);
+        return;
       }
     }
 
-    if (!bestMatch) {
-      logger.warn(`⚠️ [NO MATCH] "${epicRPGName}" | Queue empty or no match`);
-      return;
-    }
-
-    // ✅ NEW: Check if already counted in last 1 second (prevents duplicate responses)
-    const trackKey = `${bestMatch.userId}_${matchedCmd.id}`;
-    const now = Date.now();
-
-    if (this.recentlyTracked.has(trackKey)) {
-      const lastTrackTime = this.recentlyTracked.get(trackKey);
-      if (now - lastTrackTime < 1000) {
-        // logger.warn(`⚠️ [DEBOUNCE] Already counted in last 1 second`);
-        return; // Skip duplicate response
-      }
-    }
-
-    // ✅ Mark as tracked
-    this.recentlyTracked.set(trackKey, now);
-
-    // ✅ DON'T remove from queue - keep for duplicate responses within 1 second
-    // Queue cleanup will handle it after 30 seconds
+    // ✅ Get fresh display name
+    const member = message.guild.members.cache.get(userData.userId);
+    const latestDisplayName = member?.displayName || userData.displayName;
 
     const today = getTodayString();
-
-    const member = message.guild.members.cache.get(bestMatch.userId);
-    const latestDisplayName = member?.displayName || bestMatch.displayName;
 
     try {
       const result = await CommandTracker.findOneAndUpdate(
         {
-          userId: bestMatch.userId,
-          command: matchedCmd.id,
+          userId: userData.userId,
+          command: 'legendary_toothbrush',
           date: today
         },
         {
           $inc: { count: 1 },
           $set: {
-            username: bestMatch.username,
+            username: userData.username,
             displayName: latestDisplayName,
             lastUpdated: new Date()
           }
@@ -178,7 +133,7 @@ class CommandTrackerFeature {
         { upsert: true, new: true }
       );
 
-      logger.info(`✅ [TRACKED] ${latestDisplayName} (${bestMatch.userId}) → count: ${result.count}`);
+      // logger.info(`✅ [TRACKED] ${latestDisplayName} (${userData.userId}) → count: ${result.count}`);
 
     } catch (err) {
       logger.error('Error saving to DB:', err);
@@ -192,7 +147,7 @@ class CommandTrackerFeature {
       if (message.author.id === EPIC_RPG_BOT_ID) {
         await this.handleEpicRPGMessage(message);
       } else {
-        this.handleUserMessage(message);
+        await this.handleUserMessage(message);
       }
 
     } catch (err) {
