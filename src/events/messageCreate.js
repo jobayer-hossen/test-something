@@ -43,33 +43,6 @@ module.exports = {
       // ════════════════════════════════════════
       if (!message.author.bot) {
         const trimmed = message.content.trim();
-        const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
-
-        // ✅ Check if exact single word (case-insensitive)
-        if (
-          CHANNEL_COMMANDS.includes(firstWord) &&
-          trimmed.toLowerCase() === firstWord
-        ) {
-          const channelCommand = client.commands.get("lock");
-          if (channelCommand) {
-            try {
-              await channelCommand.execute(message, [], client, firstWord);
-            } catch (error) {
-              logger.error(
-                `Error executing channel command ${firstWord}:`,
-                error.message,
-              );
-            }
-          }
-          return;
-        }
-      }
-
-      // ════════════════════════════════════════
-      //         PREFIX COMMANDS (eb ...)
-      // ════════════════════════════════════════
-      if (!message.author.bot) {
-        const trimmed = message.content.trim();
         const words = trimmed.split(/\s+/);
         const firstWord = words[0].toLowerCase();
 
@@ -104,7 +77,53 @@ module.exports = {
                 );
               }
             }
-            return;
+            return; // ✅ ONLY return if valid channel command
+          }
+        }
+      }
+
+      // ════════════════════════════════════════
+      //         PREFIX COMMANDS (eb ...)
+      // ════════════════════════════════════════
+      if (lowerContent.startsWith(prefix + " ")) {
+        const args = message.content
+          .slice(prefix.length + 1)
+          .trim()
+          .split(/ +/);
+        const commandName = args.shift().toLowerCase();
+
+        if (moderationCommand.commands.includes(commandName)) {
+          try {
+            await moderationCommand.execute(message, args, client, commandName);
+          } catch (error) {
+            logger.error(
+              `Error executing moderation command [${commandName}]:`,
+              error.message,
+            );
+            await message.channel
+              .send("❌ An error occurred while executing this command!")
+              .catch(() => {});
+          }
+          return;
+        }
+
+        const resolvedName = CHANNEL_COMMANDS.includes(commandName)
+          ? "lock"
+          : commandName;
+
+        const command = client.commands.get(resolvedName);
+
+        if (command) {
+          try {
+            await command.execute(message, args, client, commandName);
+          } catch (error) {
+            logger.error(
+              `Error executing command ${commandName}:`,
+              error.message,
+            );
+            await message.channel.send(
+              "❌ An error occurred while executing this command!",
+            );
           }
         }
       }
