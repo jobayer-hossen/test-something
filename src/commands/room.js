@@ -13,7 +13,6 @@ module.exports = {
       INITIATE: manager.initiateRoleId,
       OWNER: manager.ownerRoleId,
       STAFF1: manager.staff1Id,
-      STAFF2: manager.staff2Id,
       MOD: manager.modId,
       BOTS: manager.botRoleId,
       JAIL: manager.jailRoleId,
@@ -314,13 +313,6 @@ module.exports = {
           ],
         },
         {
-          id: ROLES.STAFF2,
-          allow: [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.SendMessages,
-          ],
-        },
-        {
           id: ROLES.MOD,
           allow: [
             PermissionFlagsBits.ViewChannel,
@@ -427,7 +419,9 @@ module.exports = {
         });
       }
 
-      const ownerData = await PersonalChannel.findOne({ userId: targetUser.id });
+      const ownerData = await PersonalChannel.findOne({
+        userId: targetUser.id,
+      });
       if (!ownerData) {
         return message.channel.send({
           embeds: [
@@ -689,9 +683,6 @@ module.exports = {
       await message.channel.permissionOverwrites.edit(ROLES.STAFF1, {
         ViewChannel: true,
       });
-      await message.channel.permissionOverwrites.edit(ROLES.STAFF2, {
-        ViewChannel: true,
-      });
       await message.channel.permissionOverwrites.edit(ROLES.MOD, {
         ViewChannel: true,
       });
@@ -927,6 +918,558 @@ module.exports = {
             .setThumbnail(friend.displayAvatarURL({ dynamic: true })),
         ],
       });
+    }
+
+    // Add this inside room.js execute() — before the unknown subcommand handler
+
+    // ==========================================
+    // STAFF ONLY - Scan & Store All Room Categories
+    // eb room scan
+    // ==========================================
+    if (subCommand === "scan") {
+      if (!message.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+        return message.channel.send({
+          embeds: [errorEmbed("❌ You need **Manage Channels** permission.")],
+        });
+      }
+
+      const processingMsg = await message.channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#f39c12")
+            .setTitle("🔍 Scanning All Personal Rooms...")
+            .setDescription(
+              "Reading current category for every room in the database...\nThis may take a moment.",
+            ),
+        ],
+      });
+
+      const allRooms = await PersonalChannel.find({});
+
+      // Category name map for display
+      const categoryNames = {
+        [manager.supportersCategoryId]: "⭐ Supporters",
+        [manager.normalUserCategoryId]: "👥 Normal User",
+        [manager.archiveCategoryId]: "📦 Archive",
+      };
+
+      // Result buckets
+      const results = {
+        supporters: [], // Channels in supporters category
+        normalUser: [], // Channels in normal user category
+        archive: [], // Channels in archive category
+        outside: [], // Admin-placed channels outside managed categories
+        missing: [], // Channels deleted / not found
+      };
+
+      let processed = 0;
+
+      for (const room of allRooms) {
+        processed++;
+
+        const channel = await client.channels
+          .fetch(room.channelId)
+          .catch(() => null);
+
+        const user = await client.users.fetch(room.userId).catch(() => null);
+        const username = user ? user.username : `Unknown (${room.userId})`;
+
+        if (!channel) {
+          results.missing.push({
+            userId: room.userId,
+            username,
+            channelId: room.channelId,
+          });
+          continue;
+        }
+
+        const categoryId = channel.parentId;
+        const entry = {
+          userId: room.userId,
+          username,
+          channelId: room.channelId,
+          channelName: channel.name,
+          categoryId,
+          categoryName: categoryNames[categoryId] || `Unknown (${categoryId})`,
+        };
+
+        // Update DB with current real category
+        await PersonalChannel.findOneAndUpdate(
+          { userId: room.userId },
+          { categoryId: channel.parentId },
+        ).catch(() => null);
+
+        if (categoryId === manager.supportersCategoryId) {
+          results.supporters.push(entry);
+        } else if (categoryId === manager.normalUserCategoryId) {
+          results.normalUser.push(entry);
+        } else if (categoryId === manager.archiveCategoryId) {
+          results.archive.push(entry);
+        } else {
+          // Outside managed = admin placed
+          results.outside.push(entry);
+        }
+      }
+
+      // ==========================================
+      // BUILD RESULT EMBEDS
+      // Split into multiple embeds if needed
+      // ==========================================
+      const embeds = [];
+
+      // Summary embed
+      const summaryEmbed = new EmbedBuilder()
+        .setColor("#5865F2")
+        .setTitle("📊 Room Scan Complete")
+        .setDescription(
+          `Scanned **${processed}** rooms from database.\nAll category data has been saved to database.`,
+        )
+        .addFields(
+          {
+            name: "⭐ Supporters Category",
+            value: `${results.supporters.length} rooms`,
+            inline: true,
+          },
+          {
+            name: "👥 Normal User Category",
+            value: `${results.normalUser.length} rooms`,
+            inline: true,
+          },
+          {
+            name: "📦 Archive Category",
+            value: `${results.archive.length} rooms`,
+            inline: true,
+          },
+          {
+            name: "🔒 Admin-Placed (Outside Managed)",
+            value: `${results.outside.length} rooms`,
+            inline: true,
+          },
+          {
+            name: "❌ Missing/Deleted Channels",
+            value: `${results.missing.length} rooms`,
+            inline: true,
+          },
+        )
+        .setFooter({
+          text: `Scanned by ${message.author.username} • Category data saved to DB`,
+        })
+        .setTimestamp();
+
+      embeds.push(summaryEmbed);
+
+      // Helper to chunk array into groups of 10 for fields
+      const chunk = (arr, size) => {
+        const chunks = [];
+        for (let i = 0; i < arr.length; i += size) {
+          chunks.push(arr.slice(i, i + size));
+        }
+        return chunks;
+      };
+
+      // Supporters rooms embed
+      if (results.supporters.length > 0) {
+        const chunks = chunk(results.supporters, 10);
+        for (const [i, group] of chunks.entries()) {
+          const embed = new EmbedBuilder()
+            .setColor("#f1c40f")
+            .setTitle(`⭐ Supporters Category — Part ${i + 1}/${chunks.length}`)
+            .setDescription(
+              group
+                .map(
+                  (r) =>
+                    `• **${r.username}** → <#${r.channelId}> (\`#${r.channelName}\`)`,
+                )
+                .join("\n"),
+            );
+          embeds.push(embed);
+        }
+      }
+
+      // Normal user rooms embed
+      if (results.normalUser.length > 0) {
+        const chunks = chunk(results.normalUser, 10);
+        for (const [i, group] of chunks.entries()) {
+          const embed = new EmbedBuilder()
+            .setColor("#2ecc71")
+            .setTitle(
+              `👥 Normal User Category — Part ${i + 1}/${chunks.length}`,
+            )
+            .setDescription(
+              group
+                .map(
+                  (r) =>
+                    `• **${r.username}** → <#${r.channelId}> (\`#${r.channelName}\`)`,
+                )
+                .join("\n"),
+            );
+          embeds.push(embed);
+        }
+      }
+
+      // Archive rooms embed
+      if (results.archive.length > 0) {
+        const chunks = chunk(results.archive, 10);
+        for (const [i, group] of chunks.entries()) {
+          const embed = new EmbedBuilder()
+            .setColor("#e67e22")
+            .setTitle(`📦 Archive Category — Part ${i + 1}/${chunks.length}`)
+            .setDescription(
+              group
+                .map(
+                  (r) =>
+                    `• **${r.username}** → <#${r.channelId}> (\`#${r.channelName}\`)`,
+                )
+                .join("\n"),
+            );
+          embeds.push(embed);
+        }
+      }
+
+      // Admin-placed rooms embed
+      if (results.outside.length > 0) {
+        const chunks = chunk(results.outside, 10);
+        for (const [i, group] of chunks.entries()) {
+          const embed = new EmbedBuilder()
+            .setColor("#9b59b6")
+            .setTitle(
+              `🔒 Admin-Placed Rooms (Outside Managed) — Part ${i + 1}/${chunks.length}`,
+            )
+            .setDescription(
+              group
+                .map(
+                  (r) =>
+                    `• **${r.username}** → <#${r.channelId}> (\`#${r.channelName}\`) — Category: \`${r.categoryName}\``,
+                )
+                .join("\n"),
+            )
+            .setFooter({ text: "⚠️ These channels will NEVER be auto-moved" });
+          embeds.push(embed);
+        }
+      }
+
+      // Missing channels embed
+      if (results.missing.length > 0) {
+        const chunks = chunk(results.missing, 10);
+        for (const [i, group] of chunks.entries()) {
+          const embed = new EmbedBuilder()
+            .setColor("#e74c3c")
+            .setTitle(
+              `❌ Missing/Deleted Channels — Part ${i + 1}/${chunks.length}`,
+            )
+            .setDescription(
+              group
+                .map(
+                  (r) =>
+                    `• **${r.username}** → Channel ID: \`${r.channelId}\` (deleted or inaccessible)`,
+                )
+                .join("\n"),
+            )
+            .setFooter({
+              text: "These users still have DB records but no channel",
+            });
+          embeds.push(embed);
+        }
+      }
+
+      // Discord max 10 embeds per message - send in batches
+      await processingMsg.delete().catch(() => null);
+
+      const embedChunks = chunk(embeds, 10);
+      for (const embedBatch of embedChunks) {
+        await message.channel.send({ embeds: embedBatch });
+      }
+    }
+
+    // ==========================================
+    // STAFF ONLY - Migrate All Rooms to Correct Categories
+    // eb room migrate
+    // ==========================================
+    if (subCommand === "migrate") {
+      if (!message.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+        return message.channel.send({
+          embeds: [errorEmbed("❌ You need **Manage Channels** permission.")],
+        });
+      }
+
+      const processingMsg = await message.channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#f39c12")
+            .setTitle("🔄 Migrating All Rooms...")
+            .setDescription(
+              [
+                "Checking every room owner's booster status...",
+                "• Has booster role → **Supporters Category**",
+                "• No booster role → **Normal User Category**",
+                "",
+                "⚠️ Channels outside supporters or normal user category will be **skipped** (admin/staff placed).",
+                "",
+                "⏳ Please wait, this may take a while...",
+              ].join("\n"),
+            ),
+        ],
+      });
+
+      const allRooms = await PersonalChannel.find({});
+
+      const results = {
+        movedToSupporters: [],
+        movedToNormal: [],
+        alreadyCorrect: [],
+        skipped: [],
+        missing: [],
+      };
+
+      // Fetch log channel once
+      const logChannel = await client.channels
+        .fetch(manager.logChannelId)
+        .catch(() => null);
+
+      for (const room of allRooms) {
+        const channel = await client.channels
+          .fetch(room.channelId)
+          .catch(() => null);
+
+        const user = await client.users.fetch(room.userId).catch(() => null);
+        const username = user?.username ?? `Unknown (${room.userId})`;
+
+        // Channel deleted
+        if (!channel) {
+          results.missing.push({
+            userId: room.userId,
+            username,
+            channelId: room.channelId,
+          });
+          continue;
+        }
+
+        const currentCategoryId = channel.parentId;
+
+        // ==========================================
+        // ONLY work with supporters or normal user
+        // Everything else = admin/staff placed = skip
+        // ==========================================
+        const isSupporters = currentCategoryId === manager.supportersCategoryId;
+        const isNormalUser = currentCategoryId === manager.normalUserCategoryId;
+
+        if (!isSupporters && !isNormalUser) {
+          results.skipped.push({
+            username,
+            channelName: channel.name,
+            channelId: room.channelId,
+            categoryId: currentCategoryId,
+          });
+          continue;
+        }
+
+        // Check booster role
+        const member = await message.guild.members
+          .fetch(room.userId)
+          .catch(() => null);
+
+        const hasBooster =
+          member?.roles.cache.has(manager.boosterRoleId) ?? false;
+
+        // Correct category based on booster role
+        const correctCategory = hasBooster
+          ? manager.supportersCategoryId
+          : manager.normalUserCategoryId;
+
+        const entry = {
+          username,
+          channelName: channel.name,
+          channelId: room.channelId,
+          userId: room.userId,
+          hasBooster,
+        };
+
+        // Already in correct category - just update DB
+        if (currentCategoryId === correctCategory) {
+          results.alreadyCorrect.push(entry);
+
+          await PersonalChannel.findOneAndUpdate(
+            { userId: room.userId },
+            { categoryId: correctCategory },
+          ).catch(() => null);
+
+          continue;
+        }
+
+        // Move to correct category
+        await channel
+          .setParent(correctCategory, { lockPermissions: false })
+          .catch(() => null);
+
+        // Update DB
+        await PersonalChannel.findOneAndUpdate(
+          { userId: room.userId },
+          { categoryId: correctCategory },
+        ).catch(() => null);
+
+        if (hasBooster) {
+          results.movedToSupporters.push(entry);
+
+          // ✅ Log channel message for moved to supporters
+          if (logChannel) {
+            await logChannel.send({
+              content: `⭐ **[MIGRATE]** <@${room.userId}> has booster role. Personal room **#${channel.channelId}** moved to supporters category.`,
+            });
+          }
+        } else {
+          results.movedToNormal.push(entry);
+
+          // ✅ Log channel message for moved to normal user
+          if (logChannel) {
+            await logChannel.send({
+              content: `📦 **[MIGRATE]** <@${room.userId}> has no booster role. Personal room **#${channel.channelId}** moved to normal user category.`,
+            });
+          }
+        }
+      }
+
+      // ==========================================
+      // BUILD RESULT EMBEDS
+      // ==========================================
+      const chunk = (arr, size) => {
+        const chunks = [];
+        for (let i = 0; i < arr.length; i += size) {
+          chunks.push(arr.slice(i, i + size));
+        }
+        return chunks;
+      };
+
+      const embeds = [];
+
+      // Summary embed
+      const summaryEmbed = new EmbedBuilder()
+        .setColor("#2ecc71")
+        .setTitle("✅ Migration Complete!")
+        .addFields(
+          {
+            name: "⭐ Moved → Supporters",
+            value: `${results.movedToSupporters.length} rooms`,
+            inline: true,
+          },
+          {
+            name: "👥 Moved → Normal User",
+            value: `${results.movedToNormal.length} rooms`,
+            inline: true,
+          },
+          {
+            name: "✅ Already Correct",
+            value: `${results.alreadyCorrect.length} rooms`,
+            inline: true,
+          },
+          {
+            name: "🔒 Skipped (Admin/Staff Placed)",
+            value: `${results.skipped.length} rooms`,
+            inline: true,
+          },
+          {
+            name: "❌ Missing Channels",
+            value: `${results.missing.length} rooms`,
+            inline: true,
+          },
+        )
+        .setFooter({
+          text: `Migrated by ${message.author.username} • DB records updated`,
+        })
+        .setTimestamp();
+
+      embeds.push(summaryEmbed);
+
+      // Moved to supporters
+      if (results.movedToSupporters.length > 0) {
+        const chunks = chunk(results.movedToSupporters, 10);
+        for (const [i, group] of chunks.entries()) {
+          embeds.push(
+            new EmbedBuilder()
+              .setColor("#f1c40f")
+              .setTitle(
+                `⭐ Moved → Supporters — Part ${i + 1}/${chunks.length}`,
+              )
+              .setDescription(
+                group
+                  .map((r) => `• **${r.username}** → \`#${r.channelName}\``)
+                  .join("\n"),
+              ),
+          );
+        }
+      }
+
+      // Moved to normal user
+      if (results.movedToNormal.length > 0) {
+        const chunks = chunk(results.movedToNormal, 10);
+        for (const [i, group] of chunks.entries()) {
+          embeds.push(
+            new EmbedBuilder()
+              .setColor("#2ecc71")
+              .setTitle(
+                `👥 Moved → Normal User — Part ${i + 1}/${chunks.length}`,
+              )
+              .setDescription(
+                group
+                  .map((r) => `• **${r.username}** → \`#${r.channelName}\``)
+                  .join("\n"),
+              ),
+          );
+        }
+      }
+
+      // Skipped
+      if (results.skipped.length > 0) {
+        const chunks = chunk(results.skipped, 10);
+        for (const [i, group] of chunks.entries()) {
+          embeds.push(
+            new EmbedBuilder()
+              .setColor("#9b59b6")
+              .setTitle(
+                `🔒 Skipped (Admin/Staff Placed) — Part ${i + 1}/${chunks.length}`,
+              )
+              .setDescription(
+                group
+                  .map(
+                    (r) =>
+                      `• **${r.username}** → \`#${r.channelName}\` — Category: \`${r.categoryId}\``,
+                  )
+                  .join("\n"),
+              )
+              .setFooter({ text: "⚠️ These will NEVER be auto-moved" }),
+          );
+        }
+      }
+
+      // Missing
+      if (results.missing.length > 0) {
+        const chunks = chunk(results.missing, 10);
+        for (const [i, group] of chunks.entries()) {
+          embeds.push(
+            new EmbedBuilder()
+              .setColor("#e74c3c")
+              .setTitle(`❌ Missing Channels — Part ${i + 1}/${chunks.length}`)
+              .setDescription(
+                group
+                  .map(
+                    (r) =>
+                      `• **${r.username}** → Channel ID: \`${r.channelId}\` (deleted)`,
+                  )
+                  .join("\n"),
+              )
+              .setFooter({
+                text: "These users still have DB records but no channel",
+              }),
+          );
+        }
+      }
+
+      await processingMsg.delete().catch(() => null);
+
+      // Send in batches of 10
+      const embedBatches = chunk(embeds, 10);
+      for (const batch of embedBatches) {
+        await message.channel.send({ embeds: batch });
+      }
     }
 
     // Unknown subcommand

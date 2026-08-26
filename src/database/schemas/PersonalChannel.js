@@ -1,3 +1,4 @@
+// database/schemas/PersonalChannel.js - ADD categoryId field
 const mongoose = require('mongoose');
 
 const personalChannelSchema = new mongoose.Schema({
@@ -6,6 +7,7 @@ const personalChannelSchema = new mongoose.Schema({
   lastActivity: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now },
   friends: { type: [String], default: [] },
+  categoryId: { type: String, default: null }, // Track which category the channel is in
 });
 
 module.exports = mongoose.model('PersonalChannel', personalChannelSchema);

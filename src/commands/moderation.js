@@ -28,7 +28,7 @@ const MOD_COMMANDS = [
 ];
 
 // ════════════════════════════════════════════
-//              DATABASE SCHEMAS
+//         DATABASE SCHEMA (mod cases only)
 // ════════════════════════════════════════════
 const moderationLogSchema = new mongoose.Schema(
   {
@@ -46,14 +46,13 @@ const moderationLogSchema = new mongoose.Schema(
     moderatorUsername: { type: String, required: true },
     moderatorTag:      { type: String, required: true },
     reason:            { type: String, default: "No reason provided" },
+    // Only store evidence IF moderator replied to a message
     evidence: {
       messageContent: String,
       messageId:      String,
       channelId:      String,
       channelName:    String,
       attachments:    [String],
-      editHistory:    [{ content: String, editedAt: Date }],
-      timestamp:      Date,
     },
     duration:         { type: Number,  default: null },
     durationString:   { type: String,  default: null },
@@ -68,39 +67,9 @@ const moderationLogSchema = new mongoose.Schema(
 
 moderationLogSchema.index({ guildId: 1, caseId: 1 }, { unique: true });
 
-const messageSnapshotSchema = new mongoose.Schema(
-  {
-    messageId:        { type: String, required: true, unique: true, index: true },
-    guildId:          { type: String, required: true, index: true },
-    channelId:        { type: String, required: true },
-    channelName:      { type: String },
-    authorId:         { type: String, required: true, index: true },
-    authorUsername:   { type: String },
-    authorTag:        { type: String },
-    content:          { type: String, default: "" },
-    editHistory:      [{ content: String, editedAt: { type: Date, default: Date.now } }],
-    attachments:      [{ url: String, name: String, contentType: String }],
-    hasEmbeds:        { type: Boolean, default: false },
-    deleted:          { type: Boolean, default: false },
-    deletedAt:        { type: Date,    default: null },
-    messageCreatedAt: { type: Date },
-  },
-  { timestamps: true }
-);
-
-messageSnapshotSchema.index(
-  { createdAt: 1 },
-  { expireAfterSeconds: 30 * 24 * 60 * 60 }
-);
-
 function getModerationLog() {
   return mongoose.models.ModerationLog ||
     mongoose.model("ModerationLog", moderationLogSchema);
-}
-
-function getMessageSnapshot() {
-  return mongoose.models.MessageSnapshot ||
-    mongoose.model("MessageSnapshot", messageSnapshotSchema);
 }
 
 // ════════════════════════════════════════════
@@ -233,42 +202,28 @@ async function deactivateCase(guildId, caseId) {
 }
 
 // ════════════════════════════════════════════
-//              EVIDENCE HELPERS
+//    EVIDENCE — only from replied message
+//    No database storing. Fetch live only.
 // ════════════════════════════════════════════
-async function getSnapshot(messageId) {
-  const MessageSnapshot = getMessageSnapshot();
-  return MessageSnapshot.findOne({ messageId }).catch(() => null);
-}
-
 async function extractEvidence(message) {
-  if (!message.reference?.messageId) return {};
+  if (!message.reference?.messageId) return null;
 
-  const snap = await getSnapshot(message.reference.messageId);
-  if (!snap) {
-    try {
-      const refMsg = await message.channel.messages.fetch(message.reference.messageId);
-      return {
-        messageId:      refMsg.id,
-        messageContent: refMsg.content || "(no text content)",
-        channelId:      refMsg.channel.id,
-        channelName:    refMsg.channel.name,
-        attachments:    [...refMsg.attachments.values()].map((a) => a.url),
-        timestamp:      refMsg.createdAt,
-      };
-    } catch {
-      return {};
-    }
+  try {
+    const refMsg = await message.channel.messages.fetch(
+      message.reference.messageId
+    );
+
+    return {
+      messageId:      refMsg.id,
+      messageContent: refMsg.content || null,
+      channelId:      refMsg.channel.id,
+      channelName:    refMsg.channel.name,
+      attachments:    [...refMsg.attachments.values()].map((a) => a.url),
+    };
+  } catch {
+    // Message was deleted or not fetchable — just skip
+    return null;
   }
-
-  return {
-    messageId:      snap.messageId,
-    messageContent: snap.content,
-    channelId:      snap.channelId,
-    channelName:    snap.channelName,
-    editHistory:    snap.editHistory,
-    attachments:    snap.attachments?.map((a) => a.url),
-    timestamp:      snap.messageCreatedAt,
-  };
 }
 
 function parseReason(content, commandWord, hasMention) {
@@ -288,20 +243,20 @@ function buildJumpLink(guildId, channelId, messageId) {
 //              ACTION CONFIG
 // ════════════════════════════════════════════
 const ACTION_META = {
-  WARN:      { color: 0xFFAA00, emoji: "⚠️",  label: "Warning Issued",   dmTitle: "You Have Been Warned",     verb: "warned"     },
-  KICK:      { color: 0xFF6B00, emoji: "👢",  label: "Member Kicked",    dmTitle: "You Have Been Kicked",     verb: "kicked"     },
-  BAN:       { color: 0xFF0000, emoji: "🔨",  label: "Member Banned",    dmTitle: "You Have Been Banned",     verb: "banned"     },
-  TIMEOUT:   { color: 0xFF8C00, emoji: "🔇",  label: "Member Timed Out", dmTitle: "You Have Been Timed Out",  verb: "timed out"  },
-  UNBAN:     { color: 0x2ECC71, emoji: "✅",  label: "Member Unbanned",  dmTitle: "You Have Been Unbanned",   verb: "unbanned"   },
-  UNWARN:    { color: 0x2ECC71, emoji: "✅",  label: "Warning Removed",  dmTitle: "A Warning Was Removed",    verb: "unwarned"   },
-  UNTIMEOUT: { color: 0x2ECC71, emoji: "🔊",  label: "Timeout Removed",  dmTitle: "Your Timeout Was Removed", verb: "untimedout" },
+  WARN:      { color: 0xFFAA00, emoji: "⚠️", label: "Warning Issued",   dmTitle: "You Have Been Warned",     verb: "warned"    },
+  KICK:      { color: 0xFF6B00, emoji: "👢", label: "Member Kicked",    dmTitle: "You Have Been Kicked",     verb: "kicked"    },
+  BAN:       { color: 0xFF0000, emoji: "🔨", label: "Member Banned",    dmTitle: "You Have Been Banned",     verb: "banned"    },
+  TIMEOUT:   { color: 0xFF8C00, emoji: "🔇", label: "Member Timed Out", dmTitle: "You Have Been Timed Out",  verb: "timed out" },
+  UNBAN:     { color: 0x2ECC71, emoji: "✅", label: "Member Unbanned",  dmTitle: "You Have Been Unbanned",   verb: "unbanned"  },
+  UNWARN:    { color: 0x2ECC71, emoji: "✅", label: "Warning Removed",  dmTitle: "A Warning Was Removed",    verb: "unwarned"  },
+  UNTIMEOUT: { color: 0x2ECC71, emoji: "🔊", label: "Timeout Removed",  dmTitle: "Your Timeout Was Removed", verb: "untimedout"},
 };
 
 // ════════════════════════════════════════════
 //              EMBED BUILDERS
 // ════════════════════════════════════════════
 
-// ── DM Embed — sent directly to the user ──
+// ── DM to the punished user ──
 function buildDMEmbed({ action, guild, moderator, reason, caseId, duration, totalWarns, evidence }) {
   const meta = ACTION_META[action];
 
@@ -319,13 +274,14 @@ function buildDMEmbed({ action, guild, moderator, reason, caseId, duration, tota
     .setTimestamp();
 
   if (duration) {
-    embed.addFields({ name: "Duration", value: duration, inline: true });
+    embed.addFields({ name: "Duration", value: duration, inline: false });
   }
 
   if (totalWarns !== undefined && action === "WARN") {
-    embed.addFields({ name: "Total Warnings", value: `${totalWarns}`, inline: true });
+    embed.addFields({ name: "Total Warnings", value: `${totalWarns}`, inline: false });
   }
 
+  // Only show evidence if moderator replied to a message
   if (evidence?.messageContent) {
     embed.addFields({
       name:  "Related Message",
@@ -354,7 +310,7 @@ function buildDMEmbed({ action, guild, moderator, reason, caseId, duration, tota
   return embed;
 }
 
-// ── Log Embed — posted to mod-log channel ──
+// ── Log embed for mod-log channel ──
 function buildLogEmbed({ action, caseId, targetUser, moderator, reason, duration, evidence, totalWarns, history, commandLink }) {
   const meta = ACTION_META[action];
 
@@ -373,11 +329,7 @@ function buildLogEmbed({ action, caseId, targetUser, moderator, reason, duration
         value: `${moderator.tag || moderator.username} (<@${moderator.id}>)`,
         inline: false,
       },
-      {
-        name:  "Reason",
-        value: reason || "No reason provided",
-        inline: false,
-      }
+      { name: "Reason", value: reason || "No reason provided", inline: false },
     )
     .setFooter({ text: `Case #${caseId} • User ID: ${targetUser.id}` })
     .setTimestamp();
@@ -394,6 +346,7 @@ function buildLogEmbed({ action, caseId, targetUser, moderator, reason, duration
     embed.addFields({ name: "Command Used", value: `[Jump to message](${commandLink})`, inline: false });
   }
 
+  // Evidence only if mod replied to a message
   if (evidence?.messageContent) {
     embed.addFields({
       name:  "Evidence",
@@ -402,16 +355,8 @@ function buildLogEmbed({ action, caseId, targetUser, moderator, reason, duration
     });
   }
 
-  if (evidence?.editHistory?.length > 0) {
-    const editLog = evidence.editHistory
-      .slice(-3)
-      .map((e, i) => `Edit ${i + 1}: ${e.content?.substring(0, 100) || "—"}`)
-      .join("\n");
-    embed.addFields({ name: "Edit History", value: `\`\`\`${editLog}\`\`\``, inline: false });
-  }
-
   if (evidence?.channelId) {
-    embed.addFields({ name: "Channel", value: `<#${evidence.channelId}>`, inline: false });
+    embed.addFields({ name: "Message Channel", value: `<#${evidence.channelId}>`, inline: false });
   }
 
   if (evidence?.attachments?.length > 0) {
@@ -422,6 +367,7 @@ function buildLogEmbed({ action, caseId, targetUser, moderator, reason, duration
     });
   }
 
+  // Prior cases summary
   if (history?.length > 1) {
     const prior = history
       .slice(0, 5)
@@ -444,7 +390,7 @@ function buildLogEmbed({ action, caseId, targetUser, moderator, reason, duration
   return embed;
 }
 
-// ── Confirm Embed — shown in the command channel ──
+// ── Confirm embed in command channel ──
 function buildConfirmEmbed({ action, targetUser, reason, caseId, duration, totalWarns }) {
   const meta = ACTION_META[action];
 
@@ -453,8 +399,8 @@ function buildConfirmEmbed({ action, targetUser, reason, caseId, duration, total
     .setTitle(`${meta.emoji} ${meta.label}`)
     .setDescription(`**${targetUser.tag || targetUser.username}** has been **${meta.verb}**.`)
     .addFields(
-      { name: "Case",   value: `#${caseId}`,               inline: false },
-      { name: "Reason", value: reason || "No reason provided", inline: false },
+      { name: "Case",   value: `#${caseId}`,                    inline: false },
+      { name: "Reason", value: reason || "No reason provided",  inline: false },
     )
     .setTimestamp();
 
@@ -469,7 +415,7 @@ function buildConfirmEmbed({ action, targetUser, reason, caseId, duration, total
   return embed;
 }
 
-// ── History Embed ──
+// ── History embed ──
 function buildHistoryEmbed({ targetUser, history, guild }) {
   const activeWarns   = history.filter((h) => h.action === "WARN"    && h.active).length;
   const totalBans     = history.filter((h) => h.action === "BAN"    ).length;
@@ -482,11 +428,11 @@ function buildHistoryEmbed({ targetUser, history, guild }) {
     .setThumbnail(targetUser.displayAvatarURL?.({ dynamic: true }) ?? null)
     .addFields(
       { name: "User",            value: `<@${targetUser.id}>\n\`${targetUser.id}\``, inline: false },
-      { name: "Active Warnings", value: `${activeWarns}`,   inline: true },
-      { name: "Kicks",           value: `${totalKicks}`,    inline: true },
-      { name: "Bans",            value: `${totalBans}`,     inline: true },
-      { name: "Timeouts",        value: `${totalTimeouts}`, inline: true },
-      { name: "Total Cases",     value: `${history.length}`,inline: true },
+      { name: "Active Warnings", value: `${activeWarns}`,    inline: true },
+      { name: "Kicks",           value: `${totalKicks}`,     inline: true },
+      { name: "Bans",            value: `${totalBans}`,      inline: true },
+      { name: "Timeouts",        value: `${totalTimeouts}`,  inline: true },
+      { name: "Total Cases",     value: `${history.length}`, inline: true },
     )
     .setFooter({ text: guild.name })
     .setTimestamp();
@@ -497,8 +443,8 @@ function buildHistoryEmbed({ targetUser, history, guild }) {
   }
 
   const caseLines = history.slice(0, 10).map((h) => {
-    const meta = ACTION_META[h.action];
-    const date = new Date(h.createdAt).toLocaleDateString("en-US", {
+    const meta    = ACTION_META[h.action];
+    const date    = new Date(h.createdAt).toLocaleDateString("en-US", {
       month: "short", day: "numeric", year: "numeric",
     });
     const removed = h.active ? "" : " ~~(removed)~~";
@@ -515,92 +461,6 @@ function buildHistoryEmbed({ targetUser, history, guild }) {
   });
 
   return embed;
-}
-
-// ════════════════════════════════════════════
-//         MESSAGE SNAPSHOT LISTENERS
-// ════════════════════════════════════════════
-let snapshotListenersRegistered = false;
-
-function registerSnapshotListeners(client) {
-  if (snapshotListenersRegistered) return;
-  snapshotListenersRegistered = true;
-
-  const MessageSnapshot = getMessageSnapshot();
-
-  client.on("messageCreate", async (message) => {
-    if (!message.guild || !message.id) return;
-    try {
-      const attachments = [...(message.attachments?.values() ?? [])].map((a) => ({
-        url: a.url, name: a.name, contentType: a.contentType,
-      }));
-
-      await MessageSnapshot.findOneAndUpdate(
-        { messageId: message.id },
-        {
-          $setOnInsert: {
-            messageId:        message.id,
-            guildId:          message.guild.id,
-            channelId:        message.channel.id,
-            channelName:      message.channel.name || "unknown",
-            authorId:         message.author?.id       || "unknown",
-            authorUsername:   message.author?.username  || "unknown",
-            authorTag:        message.author?.tag || message.author?.username || "unknown",
-            content:          message.content || "",
-            attachments,
-            hasEmbeds:        (message.embeds?.length ?? 0) > 0,
-            messageCreatedAt: message.createdAt,
-          },
-        },
-        { upsert: true, new: true }
-      );
-    } catch (err) {
-      if (!err.message?.includes("duplicate key")) {
-        logger.debug("Snapshot save error:", err.message);
-      }
-    }
-  });
-
-  client.on("messageUpdate", async (oldMsg, newMsg) => {
-    if (!newMsg.guild || !newMsg.id) return;
-    if ((oldMsg.content ?? "") === (newMsg.content ?? "")) return;
-    try {
-      await MessageSnapshot.findOneAndUpdate(
-        { messageId: newMsg.id },
-        {
-          $set:  { content: newMsg.content || "" },
-          $push: { editHistory: { content: oldMsg.content || "", editedAt: new Date() } },
-          $setOnInsert: {
-            messageId:        newMsg.id,
-            guildId:          newMsg.guild.id,
-            channelId:        newMsg.channel.id,
-            channelName:      newMsg.channel.name || "unknown",
-            authorId:         newMsg.author?.id   || "unknown",
-            authorUsername:   newMsg.author?.username || "unknown",
-            authorTag:        newMsg.author?.tag   || "unknown",
-            messageCreatedAt: newMsg.createdAt,
-          },
-        },
-        { upsert: true, new: true }
-      );
-    } catch (err) {
-      logger.debug("Snapshot edit error:", err.message);
-    }
-  });
-
-  client.on("messageDelete", async (message) => {
-    if (!message.guild || !message.id) return;
-    try {
-      await MessageSnapshot.findOneAndUpdate(
-        { messageId: message.id },
-        { $set: { deleted: true, deletedAt: new Date() } }
-      );
-    } catch (err) {
-      logger.debug("Snapshot delete error:", err.message);
-    }
-  });
-
-  logger.info("Message snapshot listeners registered");
 }
 
 // ════════════════════════════════════════════
@@ -678,7 +538,7 @@ async function handleWarn(message, args, client) {
     })] });
   } catch (_) {}
 
-  // Log channel
+  // Log
   const logChannel  = message.guild.channels.cache.get(MOD_LOG_CHANNEL_ID);
   const commandLink = buildJumpLink(message.guild.id, message.channel.id, message.id);
 
@@ -690,13 +550,12 @@ async function handleWarn(message, args, client) {
     if (logMsg) await modCase.updateOne({ logMessageId: logMsg.id });
   }
 
-  // Confirm
   await respond(message, [buildConfirmEmbed({
     action: "WARN", targetUser: targetMember.user,
     reason, caseId: modCase.caseId, totalWarns,
   })]);
 
-  // Escalation alert
+  // Escalation
   if (totalWarns >= 3 && logChannel) {
     await logChannel.send({ embeds: [
       new EmbedBuilder()
@@ -743,7 +602,6 @@ async function handleKick(message, args, client) {
   const history     = await getUserHistory(message.guild.id, targetMember.id);
   const commandLink = buildJumpLink(message.guild.id, message.channel.id, message.id);
 
-  // DM before kick
   try {
     await targetMember.send({ embeds: [buildDMEmbed({
       action: "KICK", guild: message.guild, moderator: message.author,
@@ -828,7 +686,6 @@ async function handleBan(message, args, client) {
   const history     = await getUserHistory(message.guild.id, targetUser.id);
   const commandLink = buildJumpLink(message.guild.id, message.channel.id, message.id);
 
-  // DM before ban
   if (targetMember) {
     try {
       await targetMember.send({ embeds: [buildDMEmbed({
@@ -903,7 +760,7 @@ async function handleTimeout(message, args, client) {
       [
         "eb timeout @user <duration> [reason]",
         "eb timeout @user 10m Spamming",
-        "eb timeout @user 2h Excessive trolling",
+        "eb timeout @user 2h Trolling",
         "eb timeout @user 1d Repeated violations",
       ],
       [{ name: "Duration Format", value: "`s` seconds · `m` minutes · `h` hours · `d` days · `w` weeks (max 28 days)" }]
@@ -943,7 +800,6 @@ async function handleTimeout(message, args, client) {
   const commandLink       = buildJumpLink(message.guild.id, message.channel.id, message.id);
   const expiresTs         = Math.floor((Date.now() + durationMs) / 1000);
 
-  // DM before timeout
   try {
     await targetMember.send({ embeds: [buildDMEmbed({
       action: "TIMEOUT", guild: message.guild, moderator: message.author,
@@ -970,7 +826,8 @@ async function handleTimeout(message, args, client) {
   if (logChannel) {
     const logEmbed = buildLogEmbed({
       action: "TIMEOUT", caseId: modCase.caseId, targetUser: targetMember.user,
-      moderator: message.author, reason, duration: durationFormatted, evidence, history, commandLink,
+      moderator: message.author, reason, duration: durationFormatted,
+      evidence, history, commandLink,
     });
     logEmbed.addFields({ name: "Expires", value: `<t:${expiresTs}:F>`, inline: false });
 
@@ -1054,7 +911,6 @@ async function handleUnwarn(message, args, client) {
     await logChannel.send({ embeds: [logEmbed] }).catch(() => {});
   }
 
-  // Confirm to moderator
   await respond(message, [
     new EmbedBuilder()
       .setColor(0x2ECC71)
@@ -1079,13 +935,9 @@ async function handleUnwarn(message, args, client) {
           .setDescription(`A warning has been removed from your record in **${message.guild.name}**.`)
           .setThumbnail(message.guild.iconURL({ dynamic: true }))
           .addFields(
-            { name: "Case Removed",       value: `#${caseId}`,   inline: true  },
-            { name: "Remaining Warnings", value: `${remainingWarns}`, inline: true },
-            {
-              name:  "Questions?",
-              value: `[Open a support ticket](${APPEAL_CHANNEL_LINK})`,
-              inline: false,
-            },
+            { name: "Case Removed",       value: `#${caseId}`,       inline: false },
+            { name: "Remaining Warnings", value: `${remainingWarns}`, inline: false },
+            { name: "Questions?",         value: `[Open a support ticket](${APPEAL_CHANNEL_LINK})`, inline: false },
           )
           .setFooter({ text: message.guild.name })
           .setTimestamp(),
@@ -1126,7 +978,6 @@ async function handleCase(message, args, client) {
   }
 
   const modCase = await getCaseById(message.guild.id, caseId);
-
   if (!modCase) {
     return respond(message, [errEmbed("Not Found", `Case **#${caseId}** does not exist in this server.`)]);
   }
@@ -1157,9 +1008,9 @@ async function handleCase(message, args, client) {
         value: `${moderatorUser.tag || moderatorUser.username} (<@${moderatorUser.id}>)`,
         inline: false,
       },
-      { name: "Reason", value: modCase.reason || "No reason provided",                                            inline: false },
-      { name: "Date",   value: `<t:${Math.floor(new Date(modCase.createdAt).getTime() / 1000)}:F>`,               inline: false },
-      { name: "Status", value: modCase.active ? "Active" : "Removed",                                             inline: false },
+      { name: "Reason", value: modCase.reason || "No reason provided",                                                   inline: false },
+      { name: "Date",   value: `<t:${Math.floor(new Date(modCase.createdAt).getTime() / 1000)}:F>`,                      inline: false },
+      { name: "Status", value: modCase.active ? "Active" : "Removed",                                                    inline: false },
     )
     .setFooter({ text: `${message.guild.name} • Case #${caseId}` })
     .setTimestamp();
@@ -1188,16 +1039,8 @@ async function handleCase(message, args, client) {
     });
   }
 
-  if (modCase.evidence?.editHistory?.length > 0) {
-    const editLog = modCase.evidence.editHistory
-      .slice(-3)
-      .map((e, i) => `Edit ${i + 1}: ${e.content?.substring(0, 100) || "—"}`)
-      .join("\n");
-    embed.addFields({ name: "Edit History", value: `\`\`\`${editLog}\`\`\``, inline: false });
-  }
-
   if (modCase.evidence?.channelId) {
-    embed.addFields({ name: "Channel", value: `<#${modCase.evidence.channelId}>`, inline: false });
+    embed.addFields({ name: "Message Channel", value: `<#${modCase.evidence.channelId}>`, inline: false });
   }
 
   await respond(message, [embed]);
@@ -1208,37 +1051,34 @@ async function handleModhelp(message) {
   const level = getMemberLevel(message.member);
 
   const allCommands = [
-    { cmd: "eb warn @user [reason]",               desc: "Issue a warning to a user",                      level: 1 },
-    { cmd: "eb timeout @user <duration> [reason]", desc: "Timeout a user (s / m / h / d / w, max 28d)",   level: 1 },
-    { cmd: "eb kick @user [reason]",               desc: "Kick a user from the server",                    level: 3 },
-    { cmd: "eb ban @user [--days N] [reason]",     desc: "Permanently ban a user (--days removes messages)",level: 3 },
-    { cmd: "eb unwarn <caseId>",                   desc: "Remove a warning by its case ID",                level: 3 },
-    { cmd: "eb modlogs @user",                     desc: "View full moderation history of a user",         level: 1 },
-    { cmd: "eb case <caseId>",                     desc: "View full details of a specific case",           level: 1 },
+    { cmd: "eb warn @user [reason]",               desc: "Issue a warning to a user",                       level: 1 },
+    { cmd: "eb timeout @user <duration> [reason]", desc: "Timeout a user (s / m / h / d / w, max 28d)",    level: 1 },
+    { cmd: "eb kick @user [reason]",               desc: "Kick a user from the server",                     level: 3 },
+    { cmd: "eb ban @user [--days N] [reason]",     desc: "Permanently ban a user",                          level: 3 },
+    { cmd: "eb unwarn <caseId>",                   desc: "Remove a warning by its case ID",                 level: 3 },
+    { cmd: "eb modlogs @user",                     desc: "View full moderation history of a user",          level: 1 },
+    { cmd: "eb case <caseId>",                     desc: "View full details of a specific case",            level: 1 },
   ];
 
-  const available = allCommands.filter((c) => c.level <= level);
+  const fields = allCommands
+    .filter((c) => c.level <= level)
+    .map((c) => ({ name: c.cmd, value: c.desc, inline: false }));
 
-  const embed = new EmbedBuilder()
-    .setColor(0x5865F2)
-    .setTitle("🛡️ Moderation Commands")
-    .setDescription("Commands available to your role are listed below.")
-    .addFields(
-      available.map((c) => ({
-        name:   c.cmd,
-        value:  c.desc,
-        inline: false,
-      }))
-    )
-    .addFields({
-      name:  "Evidence System",
-      value: "Reply to any message before using a mod command to automatically attach it as evidence — content, edits, and attachments are all preserved even if the user deletes the message.",
-      inline: false,
-    })
-    .setFooter({ text: "All actions are logged to the mod-log channel." })
-    .setTimestamp();
+  fields.push({
+    name:  "Evidence",
+    value: "Reply to any message before using a mod command to attach it as evidence automatically.",
+    inline: false,
+  });
 
-  await respond(message, [embed]);
+  await respond(message, [
+    new EmbedBuilder()
+      .setColor(0x5865F2)
+      .setTitle("🛡️ Moderation Commands")
+      .setDescription("Commands available to your role:")
+      .addFields(fields)
+      .setFooter({ text: "All actions are logged to the mod-log channel." })
+      .setTimestamp(),
+  ]);
 }
 
 // ════════════════════════════════════════════
@@ -1248,15 +1088,13 @@ module.exports = {
   name: "moderation",
   commands: MOD_COMMANDS,
 
-  init(client) {
-    registerSnapshotListeners(client);
-  },
+  // No-op now — nothing to initialise
+  init(_client) {},
 
   async execute(message, args, client, commandName) {
     if (!hasModPermission(message.member)) {
       return respond(message, [errEmbed("Access Denied", "You don't have permission to use moderation commands.")]);
     }
-
     if (!canUseCommand(message.member, commandName)) {
       return respond(message, [errEmbed("Access Denied", `Your role cannot use \`eb ${commandName}\`.`)]);
     }
@@ -1272,7 +1110,7 @@ module.exports = {
         case "case":    return await handleCase   (message, args, client);
         case "modhelp": return await handleModhelp(message);
         default:
-          return respond(message, [errEmbed("Unknown Command", "Use `eb modhelp` for a list of available commands.")]);
+          return respond(message, [errEmbed("Unknown Command", "Use `eb modhelp` for a list of commands.")]);
       }
     } catch (err) {
       logger.error(`Moderation error [${commandName}]: ${err.message}`);

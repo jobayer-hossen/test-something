@@ -5,50 +5,54 @@ class LootBoxSummoningFeature {
   constructor(client) {
     this.client = client;
     this.roleId = "1470272874161111061";
-    // Pre-compile regex for faster matching
+    this.botId = "555955826880413696";
+    this.pingMessage = `<@&${this.roleId}> If you want EDGY! then type **SUMMON**!`;
+    this.allowedMentions = { parse: ["roles"] };
+
+    // Pre-compile regex
     this.lootboxRegex = /LOOTBOX\s+SUMMONING\s+HAS\s+STARTED/i;
+
+    // Pre-cache channel send options object (avoid recreating every time)
+    this._sendOptions = {
+      content: this.pingMessage,
+      allowedMentions: this.allowedMentions,
+    };
+  }
+
+  // ⚡ Inline fast embed check (no function call overhead)
+  _isLootboxEmbed(embed) {
+    // Check title first (most common case)
+    if (embed.title && this.lootboxRegex.test(embed.title)) return true;
+
+    // Check description as fallback
+    if (embed.description && this.lootboxRegex.test(embed.description)) return true;
+
+    // Check fields last (least common)
+    if (embed.fields?.length) {
+      for (let i = 0; i < embed.fields.length; i++) {
+        if (this.lootboxRegex.test(embed.fields[i].name)) return true;
+      }
+    }
+
+    return false;
   }
 
   async handleMessage(message) {
-    try {
-      // Early returns (fastest checks first)
-      if (!message.inGuild()) return;
-      if (message.author.id !== "555955826880413696") return;
-      if (!message.embeds?.length) return;
+    // ⚡ FASTEST checks first - primitive comparisons before anything else
+    if (message.author.id !== this.botId) return;
+    if (!message.embeds?.length) return;
+    if (!message.inGuild()) return;
 
-      const embed = message.embeds[0];
-      let found = false;
+    // ⚡ Check embed match
+    if (!this._isLootboxEmbed(message.embeds[0])) return;
 
-      // ⚡ Check title with pre-compiled regex (faster)
-      if (embed.title && this.lootboxRegex.test(embed.title)) {
-        found = true;
-      }
-
-      // ⚡ Check fields if not found in title
-      if (!found && embed.fields?.length) {
-        found = embed.fields.some((field) =>
-          field.name && this.lootboxRegex.test(field.name)
-        );
-      }
-
-      if (!found) return;
-
-      // 🚀 Send without awaiting the delete (fire and forget)
-      const sent = await message.channel.send({
-        // content: `<@&${this.roleId}> If you want EDGY! then type **SUMMON**!`,
-        content: `If you want EDGY! then type **SUMMON**!`,
-        allowedMentions: { parse: ["roles"] },
-      });
-
-      // Don't wait for deletion - do it in background
-      setTimeout(() => {
-        sent.delete().catch(() => {});
-      }, 60000);
-
-      // console.log("✅ Lootbox triggered");
-    } catch (err) {
-      logger.error("Lootbox error:", err);
-    }
+    // 🚀 Fire ping immediately - no extra processing
+    message.channel
+      .send(this._sendOptions)
+      .then((sent) => {
+        setTimeout(() => sent.delete().catch(() => {}), 40000);
+      })
+      .catch((err) => logger.error("Lootbox send error:", err));
   }
 }
 

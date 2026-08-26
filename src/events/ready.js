@@ -48,14 +48,6 @@ module.exports = {
           logger.error("Error initializing Aman Trumpet Reminder:", error);
         }
       }
-      if (client.features?.tournamentManager) {
-        const TOURNAMENT_GUILD_ID = 894383235063222313;
-        const TOURNAMENT_CHANNEL_ID = 1445056583636877434;
-        client.features.tournamentManager.start(
-          TOURNAMENT_GUILD_ID,
-          TOURNAMENT_CHANNEL_ID,
-        );
-      }
     } catch (error) {
       logger.error("Error in ready event:", error.message);
     }

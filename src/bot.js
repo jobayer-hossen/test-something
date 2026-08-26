@@ -13,17 +13,14 @@ const CoinRainFeature = require("./features/coinRain");
 const LootBoxSummoningFeature = require("./features/LootBoxSummoningFeature");
 const AmanCoinMention = require("./features/amanTrumpetReminder");
 const BaseManager = require("./features/baseManager");
-const TournamentManager = require("./features/tournamentManager");
 const CommandTrackerFeature = require("./features/commandTracker");
 const TimeTravelRolesFeature = require("./features/timeTravelRoles");
-const MessageSnapshotFeature = require("./features/messageSnapshotFeature");
-
 const BeachPartyFeature = require("./features/BeachPartyFeature");
 
 const logger = new Logger("Bot");
 
 // ════════════════════════════════════════════
-//           KEEP-ALIVE HTTP SERVER
+// KEEP-ALIVE HTTP SERVER
 // ════════════════════════════════════════════
 const keepAliveServer = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "application/json" });
@@ -45,7 +42,7 @@ keepAliveServer.on("error", (err) => {
 });
 
 // ════════════════════════════════════════════
-//           SELF-PING (Render Anti-Sleep)
+// SELF-PING (Render Anti-Sleep)
 // ════════════════════════════════════════════
 if (process.env.RENDER_EXTERNAL_URL) {
   setInterval(
@@ -58,12 +55,12 @@ if (process.env.RENDER_EXTERNAL_URL) {
           console.warn("⚠️ Self-ping failed:", err.message);
         });
     },
-    10 * 60 * 1000, // Every 10 minutes
+    10 * 60 * 1000,
   );
 }
 
 // ════════════════════════════════════════════
-//              MAIN BOT CLASS
+// MAIN BOT CLASS
 // ════════════════════════════════════════════
 class EpicRPGBot {
   constructor() {
@@ -71,15 +68,13 @@ class EpicRPGBot {
     this.isReady = false;
     this.isDestroyed = false;
 
-    // Reconnect tracking
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 10;
-    this.reconnectDelay = 5000;      // Start: 5 seconds
-    this.maxReconnectDelay = 300000; // Max: 5 minutes
+    this.reconnectDelay = 5000;
+    this.maxReconnectDelay = 300000;
     this.reconnectTimer = null;
     this.readyTimeout = null;
 
-    // Stats tracking
     this.stats = {
       startTime: Date.now(),
       totalReconnects: 0,
@@ -89,10 +84,9 @@ class EpicRPGBot {
   }
 
   // ══════════════════════════════════════════
-  //           CREATE FRESH CLIENT
+  // CREATE FRESH CLIENT
   // ══════════════════════════════════════════
   createClient() {
-    // Destroy old client if exists
     if (this.client) {
       try {
         this.client.removeAllListeners();
@@ -114,7 +108,6 @@ class EpicRPGBot {
         timeout: 30000,
         retries: 5,
       },
-      // ✅ WebSocket options for stability
       ws: {
         large_threshold: 250,
       },
@@ -129,15 +122,13 @@ class EpicRPGBot {
   }
 
   // ══════════════════════════════════════════
-  //              INITIALIZE
+  // INITIALIZE
   // ══════════════════════════════════════════
   async initialize() {
-    // ✅ Global error handlers - register ONCE at startup
     this.setupProcessHandlers();
 
     logger.info("🚀 Initializing Epic RPG Bot...");
 
-    // ✅ Validate token FIRST before anything else
     const cleanToken = this.validateToken();
     if (!cleanToken) {
       process.exit(1);
@@ -145,15 +136,13 @@ class EpicRPGBot {
 
     this.cleanToken = cleanToken;
 
-    // ✅ Connect database (non-blocking)
     await this.connectDatabase();
 
-    // ✅ First connection attempt
     await this.startBot();
   }
 
   // ══════════════════════════════════════════
-  //           VALIDATE TOKEN
+  // VALIDATE TOKEN
   // ══════════════════════════════════════════
   validateToken() {
     console.log("=== TOKEN VALIDATION ===");
@@ -171,7 +160,6 @@ class EpicRPGBot {
       return null;
     }
 
-    // Basic token format check (3 parts separated by dots)
     const parts = cleanToken.split(".");
     if (parts.length !== 3) {
       console.error("❌ Token format invalid! Expected 3 parts, got:", parts.length);
@@ -184,7 +172,7 @@ class EpicRPGBot {
   }
 
   // ══════════════════════════════════════════
-  //           START BOT (with retry)
+  // START BOT (with retry)
   // ══════════════════════════════════════════
   async startBot() {
     if (this.isDestroyed) return;
@@ -192,19 +180,15 @@ class EpicRPGBot {
     try {
       logger.info(`🔄 Starting bot (Attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`);
 
-      // Create fresh client every attempt
       this.createClient();
 
-      // Load everything onto new client
       this.loadFeatures();
       await this.loadCommands();
       await this.loadEvents();
 
-      // Setup all listeners BEFORE login
       this.setupDebugListeners();
       this.setupConnectionListeners();
 
-      // ✅ Attempt login
       console.log("🔑 Logging into Discord...");
       await this.client.login(this.cleanToken);
       console.log("✅ Login sent! Waiting for READY event...");
@@ -212,28 +196,24 @@ class EpicRPGBot {
     } catch (loginError) {
       console.error("❌ Login failed:", loginError.message);
 
-      // Check if error is unrecoverable
       if (this.isUnrecoverableError(loginError)) {
         console.error("❌ Unrecoverable error - stopping bot");
         process.exit(1);
       }
 
-      // Otherwise attempt reconnect
       this.scheduleReconnect(`Login error: ${loginError.message}`);
     }
   }
 
   // ══════════════════════════════════════════
-  //        CONNECTION LISTENERS
+  // CONNECTION LISTENERS
   // ══════════════════════════════════════════
   setupConnectionListeners() {
-    // ✅ READY - Bot is fully online
     this.client.once("ready", (client) => {
       this.isReady = true;
-      this.reconnectAttempts = 0; // Reset on successful connect
+      this.reconnectAttempts = 0;
       this.stats.lastReadyAt = Date.now();
 
-      // Clear ready timeout
       if (this.readyTimeout) {
         clearTimeout(this.readyTimeout);
         this.readyTimeout = null;
@@ -252,7 +232,6 @@ class EpicRPGBot {
       console.log("╚══════════════════════════════════════╝");
     });
 
-    // ✅ RESUMED - Reconnected after disconnect
     this.client.on("shardResume", (id, replayedEvents) => {
       this.isReady = true;
 
@@ -265,13 +244,11 @@ class EpicRPGBot {
       this.reconnectAttempts = 0;
     });
 
-    // ✅ RECONNECTING
     this.client.on("shardReconnecting", (id) => {
       this.isReady = false;
       console.log(`🔄 Shard ${id} reconnecting to Discord...`);
     });
 
-    // ✅ DISCONNECT - Handle specific close codes
     this.client.on("shardDisconnect", (event, id) => {
       this.isReady = false;
       this.stats.disconnects++;
@@ -283,24 +260,20 @@ class EpicRPGBot {
       console.warn(`   Code: ${code} | Reason: ${reason}`);
       console.warn(`   Total disconnects: ${this.stats.disconnects}`);
 
-      // ✅ Handle specific WebSocket close codes
       if (this.isUnrecoverableCode(code)) {
         console.error(`❌ Unrecoverable disconnect code: ${code}`);
         console.error(`❌ ${this.getCloseCodeReason(code)}`);
         process.exit(1);
       }
 
-      // Discord.js auto-reconnects for most codes
-      // We only manually reconnect if it doesn't
       setTimeout(() => {
         if (!this.isReady && !this.isDestroyed) {
           console.warn("⚠️ Auto-reconnect didn't work, attempting manual reconnect...");
           this.scheduleReconnect(`Shard ${id} stayed disconnected`);
         }
-      }, 15000); // Wait 15s for Discord.js auto-reconnect
+      }, 15000);
     });
 
-    // ✅ READY TIMEOUT - If ready never fires
     this.readyTimeout = setTimeout(() => {
       if (!this.isReady) {
         console.error("❌ READY event never fired in 90 seconds!");
@@ -310,12 +283,11 @@ class EpicRPGBot {
   }
 
   // ══════════════════════════════════════════
-  //         SCHEDULE RECONNECT
+  // SCHEDULE RECONNECT
   // ══════════════════════════════════════════
   scheduleReconnect(reason) {
     if (this.isDestroyed) return;
 
-    // Clear any existing reconnect timer
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -324,19 +296,16 @@ class EpicRPGBot {
     this.reconnectAttempts++;
     this.stats.totalReconnects++;
 
-    // Check max attempts
     if (this.reconnectAttempts > this.maxReconnectAttempts) {
       console.error(`❌ Max reconnect attempts (${this.maxReconnectAttempts}) reached!`);
       console.error("❌ Bot shutting down. Render will auto-restart.");
       process.exit(1);
     }
 
-    // ✅ Exponential backoff with jitter
     const baseDelay = Math.min(
       this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
       this.maxReconnectDelay,
     );
-    // Add random jitter (±20%) to prevent thundering herd
     const jitter = baseDelay * 0.2 * (Math.random() * 2 - 1);
     const delay = Math.floor(baseDelay + jitter);
 
@@ -356,7 +325,7 @@ class EpicRPGBot {
   }
 
   // ══════════════════════════════════════════
-  //         DEBUG LISTENERS
+  // DEBUG LISTENERS
   // ══════════════════════════════════════════
   setupDebugListeners() {
     this.client.on("debug", (info) => {
@@ -371,16 +340,14 @@ class EpicRPGBot {
 
     this.client.on("shardError", (err, id) => {
       console.error(`❌ SHARD ${id} ERROR:`, err.message?.substring(0, 200));
-      // Shard error doesn't always mean disconnect, let Discord.js handle it
     });
 
     this.client.on("invalidated", () => {
       console.error("❌ SESSION INVALIDATED!");
       console.error("❌ Token may be invalid or session limit hit");
-      process.exit(1); // Unrecoverable - Render will restart
+      process.exit(1);
     });
 
-    // ✅ Track REST rate limits
     this.client.rest.on("rateLimited", (info) => {
       console.warn(`⚠️ RATE LIMITED!`);
       console.warn(`   Route: ${info.method} ${info.route}`);
@@ -389,28 +356,24 @@ class EpicRPGBot {
   }
 
   // ══════════════════════════════════════════
-  //         PROCESS ERROR HANDLERS
+  // PROCESS ERROR HANDLERS
   // ══════════════════════════════════════════
   setupProcessHandlers() {
     process.on("unhandledRejection", (reason, promise) => {
       const msg = reason?.message || String(reason);
       console.error("❌ UNHANDLED REJECTION:", msg.substring(0, 300));
-
-      // Don't exit on unhandled rejections - log and continue
     });
 
     process.on("uncaughtException", (error) => {
       console.error("❌ UNCAUGHT EXCEPTION:", error.message?.substring(0, 300));
       console.error(error.stack?.substring(0, 500));
 
-      // Uncaught exceptions are dangerous - restart
       if (!this.isDestroyed) {
         this.isDestroyed = true;
         process.exit(1);
       }
     });
 
-    // ✅ Graceful shutdown handlers
     const shutdown = (signal) => {
       console.log(`\n📴 Received ${signal} - Gracefully shutting down...`);
       this.isDestroyed = true;
@@ -432,7 +395,6 @@ class EpicRPGBot {
         process.exit(0);
       });
 
-      // Force exit after 10s if graceful shutdown hangs
       setTimeout(() => process.exit(0), 10000);
     };
 
@@ -441,7 +403,7 @@ class EpicRPGBot {
   }
 
   // ══════════════════════════════════════════
-  //         UNRECOVERABLE ERROR CHECK
+  // UNRECOVERABLE ERROR CHECK
   // ══════════════════════════════════════════
   isUnrecoverableError(error) {
     const unrecoverableCodes = [
@@ -453,14 +415,7 @@ class EpicRPGBot {
   }
 
   isUnrecoverableCode(code) {
-    // Discord WebSocket close codes that mean we can't reconnect
-    const unrecoverableCodes = [
-      4004, // Authentication failed (bad token)
-      4010, // Invalid shard
-      4011, // Sharding required
-      4013, // Invalid intents
-      4014, // Disallowed intents
-    ];
+    const unrecoverableCodes = [4004, 4010, 4011, 4013, 4014];
     return unrecoverableCodes.includes(code);
   }
 
@@ -485,28 +440,26 @@ class EpicRPGBot {
   }
 
   // ══════════════════════════════════════════
-  //         DATABASE CONNECTION
+  // DATABASE CONNECTION
   // ══════════════════════════════════════════
   async connectDatabase() {
     try {
       logger.info("🔌 Connecting to MongoDB...");
       const connected = await database.connect();
-      this.dbConnection = connected; // Store on bot instance
+      this.dbConnection = connected;
       logger.info("✅ Database connected!");
     } catch (err) {
       console.warn("⚠️ Database failed - some features may not work:", err.message);
-      // Non-fatal - bot can run without DB
     }
   }
 
   // ══════════════════════════════════════════
-  //         LOAD FEATURES
+  // LOAD FEATURES
   // ══════════════════════════════════════════
   loadFeatures() {
     logger.info("📦 Loading features...");
 
     try {
-      // ✅ Pass db connection to client
       if (this.dbConnection) {
         this.client.db = this.dbConnection;
       }
@@ -515,23 +468,21 @@ class EpicRPGBot {
       this.client.features.LootBoxSummoningFeature = new LootBoxSummoningFeature(this.client);
       this.client.features.amanTrumpetReminder = new AmanCoinMention(this.client);
       this.client.features.baseManager = new BaseManager(this.client);
-      this.client.features.tournamentManager = new TournamentManager(this.client);
       this.client.features.commandTracker = new CommandTrackerFeature(this.client);
       this.client.features.welcomeMessage = new WelcomeMessageFeature(this.client);
       this.client.features.welcomeMessage.initialize();
       this.client.features.timeTravelRoles = new TimeTravelRolesFeature(this.client);
-      this.client.features.messageSnapshot = new MessageSnapshotFeature(this.client);
       this.client.features.beachPartyFeature = new BeachPartyFeature(this.client);
 
       logger.info("✅ All features loaded");
     } catch (err) {
       console.error("❌ Feature loading error:", err.message);
-      throw err; // Fatal - can't run without features
+      throw err;
     }
   }
 
   // ══════════════════════════════════════════
-  //         LOAD COMMANDS
+  // LOAD COMMANDS
   // ══════════════════════════════════════════
   async loadCommands() {
     try {
@@ -565,7 +516,7 @@ class EpicRPGBot {
   }
 
   // ══════════════════════════════════════════
-  //         LOAD EVENTS
+  // LOAD EVENTS
   // ══════════════════════════════════════════
   async loadEvents() {
     try {
@@ -601,7 +552,7 @@ class EpicRPGBot {
 }
 
 // ════════════════════════════════════════════
-//              START THE BOT
+// START THE BOT
 // ════════════════════════════════════════════
 const bot = new EpicRPGBot();
 bot.initialize().catch((err) => {
