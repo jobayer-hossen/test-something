@@ -34,11 +34,19 @@ const TT_ROLES = [
 
 const EPIC_RPG_BOT_ID = "555955826880413696";
 const PROFILE_CHANNEL_ID = "1532062090490019990";
+const EMBED_COLOR = 0x2b2d31;
 
 // ════════════════════════════════════════════
-//           SINGLE EMBED COLOR
+//        MULTILINGUAL SUPPORT
 // ════════════════════════════════════════════
-const EMBED_COLOR = 0x2b2d31; // Discord dark
+const LANGUAGES = {
+  // English
+  EN: ["time travels", "time travel"],
+  // Spanish
+  ES: ["viajes en el tiempo", "viaje en el tiempo"],
+  // Portuguese (Brazil)
+  PT: ["viagens no tempo", "viagem no tempo"],
+};
 
 class TimeTravelRolesFeature {
   constructor(client) {
@@ -61,63 +69,160 @@ class TimeTravelRolesFeature {
   // ════════════════════════════════════════════
   async handleMessage(message) {
     try {
+      // Only process EPIC RPG bot messages in the profile channel
       if (message.channelId !== PROFILE_CHANNEL_ID) return;
       if (message.author.id !== EPIC_RPG_BOT_ID) return;
-      if (!message.embeds?.length) return;
 
-      const embed = message.embeds[0];
-      const authorName = embed.author?.name || "";
+      // Check if message has EMBED
+      if (message.embeds?.length) {
+        await this.handleEmbedProfile(message);
+        return;
+      }
 
-      if (!authorName.toLowerCase().includes("profile")) return;
+      // Check if message has IMAGE (custom background)
+      if (message.attachments.size > 0) {
+        const hasImage = message.attachments.some((a) =>
+          /\.(png|jpe?g|webp|gif)$/i.test(a.name),
+        );
 
-      const timeTravels = this.extractTimeTravels(embed);
-      if (timeTravels === null) return;
-
-      const member = await this.findProfileUser(message, authorName);
-      if (!member) return;
-
-      const result = await this.assignTimeTravelRole(
-        member,
-        timeTravels,
-        message.guild,
-      );
-
-      await this.sendReply(message, member, timeTravels, result);
+        if (hasImage) {
+          await this.replyUseDefaultBg(message);
+          return;
+        }
+      }
     } catch (err) {
       logger.error("handleMessage error:", err);
     }
   }
 
   // ════════════════════════════════════════════
-  //         EXTRACT TIME TRAVELS
+  //         HANDLE EMBED PROFILE
+  // ════════════════════════════════════════════
+  async handleEmbedProfile(message) {
+    try {
+      const embed = message.embeds[0];
+      const authorName = embed.author?.name || "";
+
+      // Check if this is a profile embed
+      if (!authorName.toLowerCase().includes("profile")) {
+        return;
+      }
+
+      // Extract time travels from embed
+      const timeTravels = this.extractTimeTravels(embed);
+      if (timeTravels === null) {
+        return;
+      }
+
+      // Find the member who ran the command
+      const member = await this.findProfileUser(message, authorName);
+      if (!member) {
+        return;
+      }
+
+      // Assign the appropriate role
+      const result = await this.assignTimeTravelRole(member, timeTravels, message.guild);
+
+      // Send reply to user
+      await this.sendReply(message, member, timeTravels, result);
+    } catch (err) {
+      logger.error("handleEmbedProfile error:", err);
+    }
+  }
+
+  // ════════════════════════════════════════════
+  //    REPLY: USE DEFAULT BACKGROUND
+  // ════════════════════════════════════════════
+  async replyUseDefaultBg(message) {
+    try {
+      const embed = new EmbedBuilder()
+        .setColor(0xFF6B6B) // Red warning
+        .setTitle("⚠️ Custom Background Detected")
+        .setDescription([
+          `Hello! I detected you're using a **custom profile background**.`,
+          ``,
+          `I can only read Time Travels data from the **default EPIC RPG background**.`,
+          ``,
+          `**📋 To fix this:**`,
+          `1. Use \`rpg bg default\` to switch to the default background`,
+          `2. Then run \`rpg p\` again`,
+          `3. I'll automatically assign your **Time Travel role** ✅`,
+          ``,
+          `**Why?** Custom backgrounds make it difficult to extract accurate data.`,
+        ].join("\n"));
+
+      await message.reply({ embeds: [embed] });
+    } catch (err) {
+      logger.error("replyUseDefaultBg error:", err);
+    }
+  }
+
+  // ════════════════════════════════════════════
+  //         EXTRACT TIME TRAVELS (EMBED)
   // ════════════════════════════════════════════
   extractTimeTravels(embed) {
     try {
-      // Primary: PROGRESS field
+      // Look for PROGRESS field (primary source)
       for (const field of embed.fields || []) {
         if (field.name !== "PROGRESS") continue;
 
-        // ✅ FIX: Match numbers with commas like 17,640,220
-        const match = field.value.match(/\*\*Time travels\*\*\s*:\s*([\d,]+)/i);
-        if (match) {
-          // Remove commas before parsing → "17,640,220" → 17640220
-          return parseInt(match[1].replace(/,/g, ""));
+        // Try to match time travels in any supported language
+        const match = this.extractTimeFromText(field.value);
+        if (match !== null) {
+          return match;
         }
       }
 
-      // Fallback: search all text
+      // Fallback: search entire embed
       const allText = [
         embed.description || "",
         ...(embed.fields || []).map((f) => `${f.name}\n${f.value}`),
       ].join("\n");
 
-      // ✅ FIX: Also handle commas in fallback
-      const match = allText.match(
-        /time\s*travels?\*\*?\s*[:\-]\s*\*?\*?([\d,]+)/i,
-      );
-      return match ? parseInt(match[1].replace(/,/g, "")) : null;
+      return this.extractTimeFromText(allText);
     } catch (err) {
       logger.error("extractTimeTravels error:", err);
+      return null;
+    }
+  }
+
+  // ════════════════════════════════════════════
+  //    EXTRACT TIME TRAVELS FROM TEXT
+  // ════════════════════════════════════════════
+  extractTimeFromText(text) {
+    try {
+      // Build regex pattern with all language variations
+      const allTerms = [
+        ...LANGUAGES.EN,
+        ...LANGUAGES.ES,
+        ...LANGUAGES.PT,
+      ].join("|");
+
+      // Pattern: "Time travels: 37" or "**Time travels**: 37" (multilingual)
+      const pattern = new RegExp(
+        `\\*\\*(${allTerms})\\*\\*\\s*[:=]\\s*([\\d,]+)`,
+        "i",
+      );
+
+      const match = text.match(pattern);
+      if (match) {
+        return parseInt(match[2].replace(/,/g, ""));
+      }
+
+      // Fallback: search without bold markers
+      const fallbackPattern = new RegExp(
+        `(${allTerms})\\s*[:=]\\s*([\\d,]+)`,
+        "i",
+      );
+
+      const fallbackMatch = text.match(fallbackPattern);
+      if (fallbackMatch) {
+        return parseInt(fallbackMatch[2].replace(/,/g, ""));
+      }
+
+      return null;
+    } catch (err) {
+      logger.error("extractTimeFromText error:", err);
       return null;
     }
   }
@@ -127,7 +232,7 @@ class TimeTravelRolesFeature {
   // ════════════════════════════════════════════
   async findProfileUser(epicRpgMessage, authorName) {
     try {
-      // Method 1: Find recent rpg p command
+      // Method 1: Find recent "rpg p" command
       const messages = await epicRpgMessage.channel.messages.fetch({
         limit: 15,
         before: epicRpgMessage.id,
@@ -151,7 +256,7 @@ class TimeTravelRolesFeature {
         }
       }
 
-      // Method 2: Match by author name
+      // Method 2: Match by embed author name
       return await this.findUserByAuthorName(epicRpgMessage, authorName);
     } catch (err) {
       logger.error("findProfileUser error:", err);
@@ -164,6 +269,7 @@ class TimeTravelRolesFeature {
   // ════════════════════════════════════════════
   async findUserByAuthorName(message, authorName) {
     try {
+      // Extract name from "Username — profile"
       const nameMatch = authorName.match(/^(.+?)\s*[—–-]\s*profile/i);
       if (!nameMatch) return null;
 
@@ -202,6 +308,7 @@ class TimeTravelRolesFeature {
     };
 
     try {
+      // Find the tier that matches this TT count
       const targetTier = TT_ROLES.find(
         (t) => timeTravels >= t.min && timeTravels <= t.max,
       );
@@ -212,7 +319,7 @@ class TimeTravelRolesFeature {
 
       result.targetTier = targetTier || null;
 
-      // TT = 0 → remove all
+      // Case 1: TT = 0 → remove all TT roles
       if (!targetTier) {
         if (currentRoles.size > 0) {
           await member.roles.remove(
@@ -225,7 +332,7 @@ class TimeTravelRolesFeature {
         return result;
       }
 
-      // Remove wrong TT roles
+      // Case 2: Remove incorrect TT roles
       const toRemove = currentRoles
         .filter((r) => r.id !== targetTier.roleId)
         .map((r) => r.id);
@@ -234,20 +341,21 @@ class TimeTravelRolesFeature {
         await member.roles.remove(toRemove, `TT updated: ${timeTravels}`);
       }
 
-      // Already has correct role
+      // Case 3: Already has correct role
       if (member.roles.cache.has(targetTier.roleId)) {
         result.action = "already_has";
         result.success = true;
         return result;
       }
 
-      // Add correct role
+      // Case 4: Role doesn't exist in guild
       if (!guild.roles.cache.has(targetTier.roleId)) {
         result.action = "error";
-        result.error = `Role \`${targetTier.roleId}\` not found in guild`;
+        result.error = `Role not found in guild`;
         return result;
       }
 
+      // Case 5: Add the correct role
       await member.roles.add(
         targetTier.roleId,
         `TT: ${timeTravels} → ${targetTier.label}`,
@@ -273,7 +381,6 @@ class TimeTravelRolesFeature {
     try {
       const tier = result.targetTier;
 
-      // ✅ Status text
       let statusText = "";
       if (!result.success) {
         statusText = `❌ ${result.error}`;
@@ -285,11 +392,10 @@ class TimeTravelRolesFeature {
         statusText = `🗑️ No TT — roles removed`;
       }
 
-      // ✅ Tier text
       const tierText = tier ? `${tier.emoji} ${tier.label}` : "—";
 
       const embed = new EmbedBuilder()
-        .setColor(EMBED_COLOR)
+        .setColor(result.success ? EMBED_COLOR : 0xFF6B6B)
         .setDescription(
           [
             `**${member.user.username}** — Time Travel Check`,

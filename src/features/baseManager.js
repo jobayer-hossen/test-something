@@ -1,4 +1,4 @@
-// BaseManager.js - Final correct version
+// BaseManager.js - Updated version with category history tracking
 const PersonalChannel = require("../database/schemas/PersonalChannel");
 const Logger = require("../logger");
 const { EmbedBuilder } = require("discord.js");
@@ -72,6 +72,7 @@ class BaseManager {
         // ==========================================
         // BOOSTER LOST
         // ONLY act if channel is in supportersCategoryId
+        // Move to normal category and save history
         // ==========================================
         if (hadBooster && !hasBooster) {
           if (currentCategoryId !== this.supportersCategoryId) {
@@ -81,14 +82,18 @@ class BaseManager {
             return;
           }
 
+          // Save previous category in history before moving
+          await PersonalChannel.findOneAndUpdate(
+            { userId: newMember.id },
+            {
+              categoryId: this.normalUserCategoryId,
+              previousCategoryId: this.supportersCategoryId,
+            }
+          );
+
           await channel.setParent(this.normalUserCategoryId, {
             lockPermissions: false,
           });
-
-          await PersonalChannel.findOneAndUpdate(
-            { userId: newMember.id },
-            { categoryId: this.normalUserCategoryId }
-          );
 
           logger.info(
             `[BOOSTER LOST] #${channel.name} → Normal User Category for ${newMember.user.username}`
@@ -104,6 +109,7 @@ class BaseManager {
         // ==========================================
         // BOOSTER GAINED
         // ONLY act if channel is in normalUserCategoryId
+        // Move to supporters category and save history
         // ==========================================
         if (!hadBooster && hasBooster) {
           if (currentCategoryId !== this.normalUserCategoryId) {
@@ -113,14 +119,18 @@ class BaseManager {
             return;
           }
 
+          // Save previous category in history before moving
+          await PersonalChannel.findOneAndUpdate(
+            { userId: newMember.id },
+            {
+              categoryId: this.supportersCategoryId,
+              previousCategoryId: this.normalUserCategoryId,
+            }
+          );
+
           await channel.setParent(this.supportersCategoryId, {
             lockPermissions: false,
           });
-
-          await PersonalChannel.findOneAndUpdate(
-            { userId: newMember.id },
-            { categoryId: this.supportersCategoryId }
-          );
 
           logger.info(
             `[BOOSTER GAINED] #${channel.name} → Supporters Category for ${newMember.user.username}`
@@ -185,6 +195,11 @@ class BaseManager {
             .fetch(room.userId)
             .catch(() => null);
 
+          const guild = channel.guild;
+          const member = await guild.members
+            .fetch(room.userId)
+            .catch(() => null);
+
           // 1. DM the user FIRST (before archiving)
           if (user) {
             const dmEmbed = new EmbedBuilder()
@@ -219,18 +234,32 @@ class BaseManager {
             await user.send({ embeds: [dmEmbed] }).catch(() => null);
           }
 
-          // 2. Log to channel BEFORE archiving
+          // 2. Remove owner role from user
+          if (member) {
+            await member.roles
+              .remove(this.ownerRoleId)
+              .catch((err) => {
+                logger.error(
+                  `[INACTIVITY] Failed to remove owner role from ${room.userId}: ${err.message}`
+                );
+              });
+            logger.info(
+              `[INACTIVITY] Removed owner role (${this.ownerRoleId}) from user ${room.userId}`
+            );
+          }
+
+          // 3. Log to channel BEFORE archiving (non-clickable channel name)
           const logChannel = await this.client.channels
             .fetch(this.logChannelId)
             .catch(() => null);
 
           if (logChannel) {
             await logChannel.send({
-              content: `❌ <@${room.userId}> lost their personal <#${room.channelId}> channel after 7 days of inactivity.\n📩 Write in <#1509133186645495868> if you want a new one when you return.\n🛡️ **Spanac guild** members can contact an admin to automatically receive a new channel again.`,
+              content: `❌ <@${room.userId}> lost their personal room \`${channel.name}\` after 7 days of inactivity.\n📩 Write in <#1509133186645495868> if you want a new one when you return.\n🛡️ **Spanac guild** members can contact an admin to automatically receive a new channel again.`,
             });
           }
 
-          // 3. NOW move to archive and lock
+          // 4. NOW move to archive and lock
           await channel.setParent(this.archiveCategoryId, {
             lockPermissions: false,
           });
@@ -254,7 +283,7 @@ class BaseManager {
             },
           ]);
 
-          // 4. Remove from database
+          // 5. Remove from database
           await PersonalChannel.deleteOne({ userId: room.userId });
 
           logger.info(
