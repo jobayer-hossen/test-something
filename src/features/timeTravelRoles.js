@@ -110,7 +110,10 @@ class TimeTravelRolesFeature {
 
       // Extract time travels from embed
       const timeTravels = this.extractTimeTravels(embed);
+
+      // If time travels not found, user is new
       if (timeTravels === null) {
+        await this.replyNewPlayer(message, authorName);
         return;
       }
 
@@ -127,6 +130,38 @@ class TimeTravelRolesFeature {
       await this.sendReply(message, member, timeTravels, result);
     } catch (err) {
       logger.error("handleEmbedProfile error:", err);
+    }
+  }
+
+  // ════════════════════════════════════════════
+  //      REPLY: NEW PLAYER (NO TIME TRAVELS)
+  // ════════════════════════════════════════════
+  async replyNewPlayer(message, authorName) {
+    try {
+      const embed = new EmbedBuilder()
+        .setColor(0xFFA500) // Orange info color
+        .setTitle("📊 No Time Travels Yet")
+        .setDescription([
+          `Hello! I checked your profile, but you haven't completed any **Time Travels** yet.`,
+          ``,
+          `**🎯 To get started:**`,
+          `1. Unlock Time Travel by reaching the required level in EPIC RPG`,
+          `2. Complete your first Time Travel adventure using \`rpg time travel\``,
+          `3. Run \`rpg p\` again to check your progress`,
+          `4. If you need help about Time Travels, run \`rpg help time travel\``,
+          `5. I'll automatically assign your **Time Travel role** ✅`,
+          ``,
+          `**💡 Pro Tips:**`,
+          `• Each Time Travel increases your power and unlocks new rewards`,
+          `• You'll qualify for roles at: TT 1, TT 25, and TT 100+`,
+          `• Keep adventuring and advancing through the Time Travels!`,
+          ``,
+          `**Questions?** Check out the EPIC RPG wiki or ask in the help channel.`,
+        ].join("\n"));
+
+      await message.reply({ embeds: [embed] });
+    } catch (err) {
+      logger.error("replyNewPlayer error:", err);
     }
   }
 

@@ -2,6 +2,7 @@ const Logger = require("../logger");
 const userService = require("../database/services/userService");
 const PersonalChannel = require("../database/schemas/PersonalChannel");
 const moderationCommand = require("../commands/moderation");
+const config = require("../config");
 
 const logger = new Logger("MessageCreate");
 
@@ -15,10 +16,11 @@ module.exports = {
       if (message.author.id === client.user.id) return;
 
       // ════════════════════════════════════════
-      //         TRACK USER ACTIVITY
+      //         TRACK USER ACTIVITY (NOT BOTS)
       // ════════════════════════════════════════
-      if (!message.author.bot) {
+      if (!message.author.bot && !message.webhookId) {
         try {
+          // Existing user service tracking
           await userService.getOrCreateUser(
             message.author.id,
             message.author.username,
@@ -26,12 +28,48 @@ module.exports = {
           );
           await userService.addXP(message.author.id, 1);
 
+          // Personal channel tracking
           await PersonalChannel.findOneAndUpdate(
             { channelId: message.channel.id },
             { lastActivity: new Date() },
           ).catch(() => null);
+
+          // NEW: Activity tracker for inactivity system
+          if (client.features?.activityTracker) {
+            await client.features.activityTracker.trackActivity(message);
+          }
+
         } catch (error) {
           logger.debug("Error tracking user:", error.message);
+        }
+      }
+
+      // ════════════════════════════════════════
+      //   SUMMONER TOOTHBRUSH TRACKING (BOT ONLY)
+      // ════════════════════════════════════════
+      if (message.author.id === config.EPIC_RPG_BOT_ID && client.features?.summonerManager) {
+        try {
+          const content = message.content.trim();
+          
+          if (content.includes('casts a magic spell') && 
+              content.includes('legendary toothbrush')) {
+            
+            const nameMatch = content.match(/^\*?\*?(.+?)\*?\*?\s+casts/i);
+            if (nameMatch) {
+              const epicRPGName = nameMatch[1].replace(/\*/g, '').trim();
+              
+              const CommandTracker = require("../database/schemas/CommandTracker");
+              const userRecord = await CommandTracker.findOne({ 
+                username: epicRPGName 
+              }).lean();
+              
+              if (userRecord) {
+                await client.features.summonerManager.trackToothbrush(userRecord.userId);
+              }
+            }
+          }
+        } catch (error) {
+          logger.debug("Error tracking toothbrush:", error.message);
         }
       }
 
@@ -46,21 +84,14 @@ module.exports = {
         const words = trimmed.split(/\s+/);
         const firstWord = words[0].toLowerCase();
 
-        // ✅ Only allow if:
-        // 1. Just the command: "lock"
-        // 2. Command + channel mention: "lock #channel"
-        // 3. Command + argument: "slow 3" (for slow command only)
         if (CHANNEL_COMMANDS.includes(firstWord)) {
           let isValid = false;
 
           if (words.length === 1) {
-            // Just "lock"
             isValid = true;
           } else if (words.length === 2 && words[1].match(/^<#\d+>$/)) {
-            // "lock #channel"
             isValid = true;
           } else if (firstWord === "slow" && words.length === 2) {
-            // "slow 3" or "slow off"
             isValid = true;
           }
 
@@ -77,7 +108,7 @@ module.exports = {
                 );
               }
             }
-            return; // ✅ ONLY return if valid channel command
+            return;
           }
         }
       }

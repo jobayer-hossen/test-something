@@ -8,6 +8,10 @@ const config = require("./config");
 const database = require("./database/connection");
 
 // Features
+const ActivityTracker = require("./features/ActivityTracker");
+const RoleManager = require("./features/RoleManager");
+const InactivityMonitor = require("./features/InactivityMonitor");
+const SummonerManager = require("./features/SummonerManager");
 const WelcomeMessageFeature = require("./features/welcomeMessage");
 const CoinRainFeature = require("./features/coinRain");
 const LootBoxSummoningFeature = require("./features/LootBoxSummoningFeature");
@@ -23,6 +27,27 @@ const logger = new Logger("Bot");
 // KEEP-ALIVE HTTP SERVER
 // ════════════════════════════════════════════
 const keepAliveServer = http.createServer((req, res) => {
+  if (req.url === "/health") {
+    const health = {
+      status: "alive",
+      uptime: process.uptime().toFixed(0) + "s",
+      timestamp: new Date().toISOString(),
+      features: {
+        activityTracker: !!this.client?.features?.activityTracker,
+        roleManager: !!this.client?.features?.roleManager,
+        inactivityMonitor: !!this.client?.features?.inactivityMonitor,
+        summonerManager: !!this.client?.features?.summonerManager,
+      },
+      inactivityRunning:
+        this.client?.features?.inactivityMonitor?.isRunning || false,
+      summonerEvaluating:
+        this.client?.features?.summonerManager?.isEvaluating || false,
+    };
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify(health, null, 2));
+  }
+
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(
     JSON.stringify({
@@ -49,7 +74,9 @@ if (process.env.RENDER_EXTERNAL_URL) {
     () => {
       https
         .get(process.env.RENDER_EXTERNAL_URL, (res) => {
-          console.log(`🏓 Self-ping: ${res.statusCode} | Uptime: ${process.uptime().toFixed(0)}s`);
+          console.log(
+            `🏓 Self-ping: ${res.statusCode} | Uptime: ${process.uptime().toFixed(0)}s`,
+          );
         })
         .on("error", (err) => {
           console.warn("⚠️ Self-ping failed:", err.message);
@@ -162,7 +189,10 @@ class EpicRPGBot {
 
     const parts = cleanToken.split(".");
     if (parts.length !== 3) {
-      console.error("❌ Token format invalid! Expected 3 parts, got:", parts.length);
+      console.error(
+        "❌ Token format invalid! Expected 3 parts, got:",
+        parts.length,
+      );
       return null;
     }
 
@@ -178,7 +208,9 @@ class EpicRPGBot {
     if (this.isDestroyed) return;
 
     try {
-      logger.info(`🔄 Starting bot (Attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`);
+      logger.info(
+        `🔄 Starting bot (Attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`,
+      );
 
       this.createClient();
 
@@ -192,7 +224,6 @@ class EpicRPGBot {
       console.log("🔑 Logging into Discord...");
       await this.client.login(this.cleanToken);
       console.log("✅ Login sent! Waiting for READY event...");
-
     } catch (loginError) {
       console.error("❌ Login failed:", loginError.message);
 
@@ -226,9 +257,13 @@ class EpicRPGBot {
       console.log("╠══════════════════════════════════════╣");
       console.log(`║ 🤖 Tag:     ${client.user.tag.padEnd(24)}║`);
       console.log(`║ 🆔 ID:      ${client.user.id.padEnd(24)}║`);
-      console.log(`║ 🏰 Guilds:  ${String(client.guilds.cache.size).padEnd(24)}║`);
+      console.log(
+        `║ 🏰 Guilds:  ${String(client.guilds.cache.size).padEnd(24)}║`,
+      );
       console.log(`║ ⏱️  Startup: ${(uptime + "s").padEnd(24)}║`);
-      console.log(`║ 🔄 Reconnects: ${String(this.stats.totalReconnects).padEnd(21)}║`);
+      console.log(
+        `║ 🔄 Reconnects: ${String(this.stats.totalReconnects).padEnd(21)}║`,
+      );
       console.log("╚══════════════════════════════════════╝");
     });
 
@@ -240,7 +275,9 @@ class EpicRPGBot {
         this.readyTimeout = null;
       }
 
-      console.log(`✅ Shard ${id} RESUMED | Replayed: ${replayedEvents} events`);
+      console.log(
+        `✅ Shard ${id} RESUMED | Replayed: ${replayedEvents} events`,
+      );
       this.reconnectAttempts = 0;
     });
 
@@ -268,7 +305,9 @@ class EpicRPGBot {
 
       setTimeout(() => {
         if (!this.isReady && !this.isDestroyed) {
-          console.warn("⚠️ Auto-reconnect didn't work, attempting manual reconnect...");
+          console.warn(
+            "⚠️ Auto-reconnect didn't work, attempting manual reconnect...",
+          );
           this.scheduleReconnect(`Shard ${id} stayed disconnected`);
         }
       }, 15000);
@@ -297,7 +336,9 @@ class EpicRPGBot {
     this.stats.totalReconnects++;
 
     if (this.reconnectAttempts > this.maxReconnectAttempts) {
-      console.error(`❌ Max reconnect attempts (${this.maxReconnectAttempts}) reached!`);
+      console.error(
+        `❌ Max reconnect attempts (${this.maxReconnectAttempts}) reached!`,
+      );
       console.error("❌ Bot shutting down. Render will auto-restart.");
       process.exit(1);
     }
@@ -313,13 +354,21 @@ class EpicRPGBot {
     console.log("║         🔄 RECONNECT SCHEDULED       ║");
     console.log("╠══════════════════════════════════════╣");
     console.log(`║ Reason:   ${reason.substring(0, 27).padEnd(27)}║`);
-    console.log(`║ Attempt:  ${String(`${this.reconnectAttempts}/${this.maxReconnectAttempts}`).padEnd(27)}║`);
-    console.log(`║ Delay:    ${String((delay / 1000).toFixed(1) + "s").padEnd(27)}║`);
-    console.log(`║ Total:    ${String(this.stats.totalReconnects + " reconnects").padEnd(27)}║`);
+    console.log(
+      `║ Attempt:  ${String(`${this.reconnectAttempts}/${this.maxReconnectAttempts}`).padEnd(27)}║`,
+    );
+    console.log(
+      `║ Delay:    ${String((delay / 1000).toFixed(1) + "s").padEnd(27)}║`,
+    );
+    console.log(
+      `║ Total:    ${String(this.stats.totalReconnects + " reconnects").padEnd(27)}║`,
+    );
     console.log("╚══════════════════════════════════════╝");
 
     this.reconnectTimer = setTimeout(async () => {
-      console.log(`🔄 Executing reconnect attempt ${this.reconnectAttempts}...`);
+      console.log(
+        `🔄 Executing reconnect attempt ${this.reconnectAttempts}...`,
+      );
       await this.startBot();
     }, delay);
   }
@@ -329,7 +378,9 @@ class EpicRPGBot {
   // ══════════════════════════════════════════
   setupDebugListeners() {
     this.client.on("debug", (info) => {
-      if (/Connecting|READY|Session|Resume|Identify|Error|Invalid/i.test(info)) {
+      if (
+        /Connecting|READY|Session|Resume|Identify|Error|Invalid/i.test(info)
+      ) {
         console.log("🔧 GATEWAY:", info.substring(0, 250));
       }
     });
@@ -374,12 +425,29 @@ class EpicRPGBot {
       }
     });
 
-    const shutdown = (signal) => {
+    const shutdown = async (signal) => {
       console.log(`\n📴 Received ${signal} - Gracefully shutting down...`);
       this.isDestroyed = true;
 
       if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
       if (this.readyTimeout) clearTimeout(this.readyTimeout);
+
+      // Shutdown features gracefully
+      try {
+        if (this.client?.features?.activityTracker) {
+          await this.client.features.activityTracker.shutdown();
+        }
+
+        if (this.client?.features?.inactivityMonitor) {
+          this.client.features.inactivityMonitor.shutdown();
+        }
+
+        if (this.client?.features?.summonerManager) {
+          this.client.features.summonerManager.shutdown();
+        }
+      } catch (error) {
+        console.error("Error during feature shutdown:", error);
+      }
 
       if (this.client) {
         try {
@@ -449,7 +517,10 @@ class EpicRPGBot {
       this.dbConnection = connected;
       logger.info("✅ Database connected!");
     } catch (err) {
-      console.warn("⚠️ Database failed - some features may not work:", err.message);
+      console.warn(
+        "⚠️ Database failed - some features may not work:",
+        err.message,
+      );
     }
   }
 
@@ -464,15 +535,39 @@ class EpicRPGBot {
         this.client.db = this.dbConnection;
       }
 
+      // Existing features
       this.client.features.coinRain = new CoinRainFeature(this.client);
-      this.client.features.LootBoxSummoningFeature = new LootBoxSummoningFeature(this.client);
-      this.client.features.amanTrumpetReminder = new AmanCoinMention(this.client);
+      this.client.features.LootBoxSummoningFeature =
+        new LootBoxSummoningFeature(this.client);
+      this.client.features.amanTrumpetReminder = new AmanCoinMention(
+        this.client,
+      );
       this.client.features.baseManager = new BaseManager(this.client);
-      this.client.features.commandTracker = new CommandTrackerFeature(this.client);
-      this.client.features.welcomeMessage = new WelcomeMessageFeature(this.client);
+      this.client.features.commandTracker = new CommandTrackerFeature(
+        this.client,
+      );
+      this.client.features.welcomeMessage = new WelcomeMessageFeature(
+        this.client,
+      );
       this.client.features.welcomeMessage.initialize();
-      this.client.features.timeTravelRoles = new TimeTravelRolesFeature(this.client);
-      this.client.features.beachPartyFeature = new BeachPartyFeature(this.client);
+      this.client.features.timeTravelRoles = new TimeTravelRolesFeature(
+        this.client,
+      );
+      this.client.features.beachPartyFeature = new BeachPartyFeature(
+        this.client,
+      );
+
+      // NEW FEATURES
+      this.client.features.activityTracker = new ActivityTracker(this.client);
+      this.client.features.activityTracker.initialize();
+
+      this.client.features.roleManager = new RoleManager(this.client);
+
+      this.client.features.inactivityMonitor = new InactivityMonitor(
+        this.client,
+      );
+
+      this.client.features.summonerManager = new SummonerManager(this.client);
 
       logger.info("✅ All features loaded");
     } catch (err) {

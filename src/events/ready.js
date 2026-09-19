@@ -23,7 +23,7 @@ module.exports = {
           { name: "🌧️ Coin Rains Happening!", type: 3 },
           { name: "🎁 Massive Summon Drops", type: 3 },
           { name: "⚡ Epic Summon Events", type: 3 },
-          { name: "💎 Win Amazing Rewards", type: 3 },
+          { name: "🌧️ Summon rain everyday", type: 3 },
           { name: "🤝 Invite Friends & Earn Rewards", type: 3 },
           { name: "💰 Gamble Responsibly in EPIC-BOTS", type: 3 },
           { name: "🔥 Active Community Events", type: 3 },
@@ -47,6 +47,13 @@ module.exports = {
         } catch (error) {
           logger.error("Error initializing Aman Trumpet Reminder:", error);
         }
+      }
+      if (client.features?.inactivityMonitor) {
+        client.features.inactivityMonitor.initialize();
+      }
+
+      if (client.features?.summonerManager) {
+        client.features.summonerManager.initialize();
       }
     } catch (error) {
       logger.error("Error in ready event:", error.message);
