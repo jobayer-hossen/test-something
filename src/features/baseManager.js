@@ -77,7 +77,7 @@ class BaseManager {
         if (hadBooster && !hasBooster) {
           if (currentCategoryId !== this.supportersCategoryId) {
             logger.info(
-              `[BOOSTER LOST] Skipping #${channel.name} — not in supporters category. Never touching.`
+              `[BOOSTER LOST] Skipping #${channel.name} — not in supporters category. Never touching.`,
             );
             return;
           }
@@ -88,15 +88,27 @@ class BaseManager {
             {
               categoryId: this.normalUserCategoryId,
               previousCategoryId: this.supportersCategoryId,
-            }
+            },
           );
 
+          // Move to normal category
           await channel.setParent(this.normalUserCategoryId, {
             lockPermissions: false,
           });
 
+          // ✅ Move to bottom of category
+          const category = await this.client.channels.fetch(
+            this.normalUserCategoryId,
+          );
+          const channelsInCategory = category.children.cache
+            .filter((ch) => ch.type === 0) // Only text channels
+            .sort((a, b) => a.position - b.position);
+
+          const lastPosition = channelsInCategory.last()?.position || 0;
+          await channel.setPosition(lastPosition + 1);
+
           logger.info(
-            `[BOOSTER LOST] #${channel.name} → Normal User Category for ${newMember.user.username}`
+            `[BOOSTER LOST] #${channel.name} → Normal User Category (bottom) for ${newMember.user.username}`,
           );
 
           if (logChannel) {
@@ -114,7 +126,7 @@ class BaseManager {
         if (!hadBooster && hasBooster) {
           if (currentCategoryId !== this.normalUserCategoryId) {
             logger.info(
-              `[BOOSTER GAINED] Skipping #${channel.name} — not in normal user category. Never touching.`
+              `[BOOSTER GAINED] Skipping #${channel.name} — not in normal user category. Never touching.`,
             );
             return;
           }
@@ -125,15 +137,27 @@ class BaseManager {
             {
               categoryId: this.supportersCategoryId,
               previousCategoryId: this.normalUserCategoryId,
-            }
+            },
           );
 
+          // Move to supporters category
           await channel.setParent(this.supportersCategoryId, {
             lockPermissions: false,
           });
 
+          // ✅ Move to bottom of category
+          const category = await this.client.channels.fetch(
+            this.supportersCategoryId,
+          );
+          const channelsInCategory = category.children.cache
+            .filter((ch) => ch.type === 0) // Only text channels
+            .sort((a, b) => a.position - b.position);
+
+          const lastPosition = channelsInCategory.last()?.position || 0;
+          await channel.setPosition(lastPosition + 1);
+
           logger.info(
-            `[BOOSTER GAINED] #${channel.name} → Supporters Category for ${newMember.user.username}`
+            `[BOOSTER GAINED] #${channel.name} → Supporters Category (bottom) for ${newMember.user.username}`,
           );
 
           if (logChannel) {
@@ -172,7 +196,7 @@ class BaseManager {
           if (!channel) {
             await PersonalChannel.deleteOne({ userId: room.userId });
             logger.info(
-              `[INACTIVITY] Cleaned DB record for deleted channel. User: ${room.userId}`
+              `[INACTIVITY] Cleaned DB record for deleted channel. User: ${room.userId}`,
             );
             continue;
           }
@@ -186,7 +210,7 @@ class BaseManager {
           // ==========================================
           if (!this.inactivityManagedCategories.includes(currentCategoryId)) {
             logger.info(
-              `[INACTIVITY] Skipping #${channel.name} — in unmanaged category (${currentCategoryId}). Admin/staff channel, never touching.`
+              `[INACTIVITY] Skipping #${channel.name} — in unmanaged category (${currentCategoryId}). Admin/staff channel, never touching.`,
             );
             continue;
           }
@@ -210,7 +234,7 @@ class BaseManager {
                 iconURL: channel.guild.iconURL(),
               })
               .setDescription(
-                `Hello **${user.username}**, your personal room has been closed and access has been removed due to **inactivity**.`
+                `Hello **${user.username}**, your personal room has been closed and access has been removed due to **inactivity**.`,
               )
               .addFields(
                 {
@@ -222,7 +246,7 @@ class BaseManager {
                   name: "⏳ Status",
                   value: "Inactive (Limit Reached)",
                   inline: true,
-                }
+                },
               )
               .addFields({
                 name: "📩 Want to return?",
@@ -236,15 +260,13 @@ class BaseManager {
 
           // 2. Remove owner role from user
           if (member) {
-            await member.roles
-              .remove(this.ownerRoleId)
-              .catch((err) => {
-                logger.error(
-                  `[INACTIVITY] Failed to remove owner role from ${room.userId}: ${err.message}`
-                );
-              });
+            await member.roles.remove(this.ownerRoleId).catch((err) => {
+              logger.error(
+                `[INACTIVITY] Failed to remove owner role from ${room.userId}: ${err.message}`,
+              );
+            });
             logger.info(
-              `[INACTIVITY] Removed owner role (${this.ownerRoleId}) from user ${room.userId}`
+              `[INACTIVITY] Removed owner role (${this.ownerRoleId}) from user ${room.userId}`,
             );
           }
 
@@ -287,7 +309,7 @@ class BaseManager {
           await PersonalChannel.deleteOne({ userId: room.userId });
 
           logger.info(
-            `[INACTIVITY] Removed room #${channel.name} for user ${room.userId}`
+            `[INACTIVITY] Removed room #${channel.name} for user ${room.userId}`,
           );
         } catch (err) {
           logger.error(`[INACTIVITY ERROR] ${err.message}`);

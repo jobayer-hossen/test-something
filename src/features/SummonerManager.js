@@ -21,7 +21,6 @@ class SummonerManager {
       await this.ensureActivePeriod();
       await this.checkPeriodStatus();
       this.startMonitoring();
-      await this.postSummonerPerks();
     } catch (error) {
       logger.error('Error initializing SummonerManager:', error);
     }
@@ -175,7 +174,7 @@ class SummonerManager {
 
   async sendAwardAnnouncement(guild, member) {
     try {
-      const channel = await guild.channels.fetch(config.ANNOUNCEMENT_CHANNEL_ID);
+      const channel = await guild.channels.fetch(config.USER_LOGS_CHANNEL_ID);
       if (!channel) return;
 
       const epicPerksChannel = `<#${config.EPIC_PERKS_CHANNEL_ID}>`;
@@ -332,71 +331,6 @@ class SummonerManager {
 
     } catch (error) {
       logger.error('Error sending removal log:', error);
-    }
-  }
-
-  async postSummonerPerks() {
-    try {
-      const guild = await this.client.guilds.fetch(config.GUILD_ID);
-      if (!guild) return;
-
-      const channel = await guild.channels.fetch(config.EPIC_PERKS_CHANNEL_ID);
-      if (!channel) return;
-
-      const messages = await channel.messages.fetch({ limit: 10 });
-      const existingEmbed = messages.find(msg => 
-        msg.author.id === this.client.user.id && 
-        msg.embeds.length > 0 && 
-        msg.embeds[0].title === 'Summoner Role'
-      );
-
-      if (existingEmbed) return;
-
-      const embed = new EmbedBuilder()
-        .setColor(0x00D9FF)
-        .setTitle('Summoner Role')
-        .setDescription('The Summoner role is awarded to the most dedicated members!')
-        .addFields(
-          {
-            name: 'How to Earn',
-            value: `Complete **${config.SUMMONER_THRESHOLD} legendary toothbrushes** within **${config.SUMMONER_PERIOD_DAYS} days**`,
-            inline: false,
-          },
-          {
-            name: 'Evaluation Period',
-            value: `Global ${config.SUMMONER_PERIOD_DAYS}-day cycles for all members`,
-            inline: false,
-          },
-          {
-            name: 'How It Works',
-            value: 
-              `• Role is awarded immediately when you hit ${config.SUMMONER_THRESHOLD}\n` +
-              `• Every ${config.SUMMONER_PERIOD_DAYS} days, your progress is evaluated\n` +
-              `• Keep the role by maintaining ${config.SUMMONER_THRESHOLD}+ toothbrushes\n` +
-              `• Fall below ${config.SUMMONER_THRESHOLD} = role is removed`,
-            inline: false,
-          },
-          {
-            name: 'Perks',
-            value:
-              '• Access to exclusive Summoner commands\n' +
-              '• Special role color and recognition\n' +
-              '• Priority in events',
-            inline: false,
-          },
-          {
-            name: 'Check Your Progress',
-            value: `Use \`eb ct ${config.SUMMONER_PERIOD_DAYS}d\` to see your toothbrush count`,
-            inline: false,
-          }
-        )
-        .setFooter({ text: 'Keep grinding to maintain your Summoner status!' })
-        .setTimestamp();
-
-      await channel.send({ embeds: [embed] });
-
-    } catch (error) {
-      logger.error('Error posting summoner perks:', error);
     }
   }
 
