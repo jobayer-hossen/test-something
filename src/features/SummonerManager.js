@@ -1,12 +1,12 @@
-const Logger = require('../logger');
-const User = require('../database/schemas/User');
-const CommandTracker = require('../database/schemas/CommandTracker');
-const SummonerPeriod = require('../database/schemas/SummonerPeriod');
-const RoleChangeLog = require('../database/schemas/RoleChangeLog');
-const config = require('../config');
-const { EmbedBuilder } = require('discord.js');
+const Logger = require("../logger");
+const User = require("../database/schemas/User");
+const CommandTracker = require("../database/schemas/CommandTracker");
+const SummonerPeriod = require("../database/schemas/SummonerPeriod");
+const RoleChangeLog = require("../database/schemas/RoleChangeLog");
+const config = require("../config");
+const { EmbedBuilder } = require("discord.js");
 
-const logger = new Logger('SummonerManager');
+const logger = new Logger("SummonerManager");
 
 class SummonerManager {
   constructor(client) {
@@ -22,16 +22,18 @@ class SummonerManager {
       await this.checkPeriodStatus();
       this.startMonitoring();
     } catch (error) {
-      logger.error('Error initializing SummonerManager:', error);
+      logger.error("Error initializing SummonerManager:", error);
     }
   }
 
   async ensureActivePeriod() {
     try {
-      const activePeriod = await SummonerPeriod.findOne({ status: 'active' });
+      const activePeriod = await SummonerPeriod.findOne({ status: "active" });
 
       if (!activePeriod) {
-        const lastPeriod = await SummonerPeriod.findOne().sort({ periodNumber: -1 });
+        const lastPeriod = await SummonerPeriod.findOne().sort({
+          periodNumber: -1,
+        });
         const periodNumber = lastPeriod ? lastPeriod.periodNumber + 1 : 1;
 
         const startDate = new Date();
@@ -42,19 +44,18 @@ class SummonerManager {
           periodNumber,
           startDate,
           endDate,
-          status: 'active',
+          status: "active",
           results: [],
         });
       }
-
     } catch (error) {
-      logger.error('Error ensuring active period:', error);
+      logger.error("Error ensuring active period:", error);
     }
   }
 
   async checkPeriodStatus() {
     try {
-      const activePeriod = await SummonerPeriod.findOne({ status: 'active' });
+      const activePeriod = await SummonerPeriod.findOne({ status: "active" });
 
       if (!activePeriod) return;
 
@@ -64,9 +65,8 @@ class SummonerManager {
       if (now >= endDate) {
         await this.evaluatePeriod(activePeriod, true);
       }
-
     } catch (error) {
-      logger.error('Error checking period status:', error);
+      logger.error("Error checking period status:", error);
     }
   }
 
@@ -78,7 +78,7 @@ class SummonerManager {
 
   async trackToothbrush(userId) {
     try {
-      const activePeriod = await SummonerPeriod.findOne({ status: 'active' });
+      const activePeriod = await SummonerPeriod.findOne({ status: "active" });
       if (!activePeriod) return;
 
       const count = await this.getUserToothbrushCount(userId, activePeriod);
@@ -86,9 +86,8 @@ class SummonerManager {
       if (count >= config.SUMMONER_THRESHOLD) {
         await this.awardSummonerRole(userId, activePeriod.periodNumber, count);
       }
-
     } catch (error) {
-      logger.error('Error tracking toothbrush:', error);
+      logger.error("Error tracking toothbrush:", error);
     }
   }
 
@@ -101,7 +100,7 @@ class SummonerManager {
       const current = new Date(startDate);
 
       while (current <= endDate) {
-        dates.push(current.toISOString().split('T')[0]);
+        dates.push(current.toISOString().split("T")[0]);
         current.setDate(current.getDate() + 1);
       }
 
@@ -112,9 +111,8 @@ class SummonerManager {
       }).lean();
 
       return records.reduce((sum, record) => sum + record.count, 0);
-
     } catch (error) {
-      logger.error('Error getting toothbrush count:', error);
+      logger.error("Error getting toothbrush count:", error);
       return 0;
     }
   }
@@ -140,7 +138,10 @@ class SummonerManager {
         return;
       }
 
-      await member.roles.add(config.SUMMONER_ROLE_ID, 'Reached 500 toothbrushes');
+      await member.roles.add(
+        config.SUMMONER_ROLE_ID,
+        "Reached 500 toothbrushes",
+      );
 
       await User.findOneAndUpdate(
         { userId },
@@ -150,7 +151,7 @@ class SummonerManager {
             summonerAwardedInPeriod: periodNumber,
           },
         },
-        { upsert: true }
+        { upsert: true },
       );
 
       await RoleChangeLog.create({
@@ -158,7 +159,7 @@ class SummonerManager {
         username: member.user.username,
         addedRoles: [config.SUMMONER_ROLE_ID],
         removedRoles: [],
-        changeType: 'bot_action',
+        changeType: "bot_action",
         changedBy: this.client.user.id,
         reason: `Summoner awarded: ${count} toothbrushes in period ${periodNumber}`,
         timestamp: new Date(),
@@ -166,9 +167,8 @@ class SummonerManager {
       });
 
       await this.sendAwardAnnouncement(guild, member);
-
     } catch (error) {
-      logger.error('Error awarding summoner role:', error);
+      logger.error("Error awarding summoner role:", error);
     }
   }
 
@@ -180,12 +180,15 @@ class SummonerManager {
       const epicPerksChannel = `<#${config.EPIC_PERKS_CHANNEL_ID}>`;
       const summonerRole = `<@&${config.SUMMONER_ROLE_ID}>`;
 
-      await channel.send(
-        `🎉 ${member} received the ${summonerRole} role! Read ${epicPerksChannel} to discover the Summoner perks.`
-      );
-
+      await channel.send({
+        content: `🎉 ${member} received the ${summonerRole} role! Read ${epicPerksChannel} to discover the Summoner perks.`,
+        allowedMentions: {
+          roles: [], // Prevents any role from being pinged/notified
+          users: [member.id], // (Optional) Ensures only the awarded member gets pinged
+        },
+      });
     } catch (error) {
-      logger.error('Error sending award announcement:', error);
+      logger.error("Error sending award announcement:", error);
     }
   }
 
@@ -202,7 +205,7 @@ class SummonerManager {
       }
 
       await SummonerPeriod.findByIdAndUpdate(period._id, {
-        $set: { status: 'evaluating' },
+        $set: { status: "evaluating" },
       });
 
       const summonerRole = await guild.roles.fetch(config.SUMMONER_ROLE_ID);
@@ -224,7 +227,7 @@ class SummonerManager {
               username: member.user.username,
               toothbrushCount: 0,
               hadRole: true,
-              action: 'manual_override_skip',
+              action: "manual_override_skip",
               timestamp: new Date(),
             });
             continue;
@@ -238,13 +241,13 @@ class SummonerManager {
               username: member.user.username,
               toothbrushCount: count,
               hadRole: true,
-              action: 'kept',
+              action: "kept",
               timestamp: new Date(),
             });
           } else {
             await member.roles.remove(
               config.SUMMONER_ROLE_ID,
-              `Failed to maintain ${config.SUMMONER_THRESHOLD} toothbrushes`
+              `Failed to maintain ${config.SUMMONER_THRESHOLD} toothbrushes`,
             );
 
             await RoleChangeLog.create({
@@ -252,7 +255,7 @@ class SummonerManager {
               username: member.user.username,
               addedRoles: [],
               removedRoles: [config.SUMMONER_ROLE_ID],
-              changeType: 'bot_action',
+              changeType: "bot_action",
               changedBy: this.client.user.id,
               reason: `Period evaluation: ${count}/${config.SUMMONER_THRESHOLD} toothbrushes`,
               timestamp: new Date(),
@@ -264,13 +267,12 @@ class SummonerManager {
               username: member.user.username,
               toothbrushCount: count,
               hadRole: true,
-              action: 'removed',
+              action: "removed",
               timestamp: new Date(),
             });
 
             await this.sendRemovalLog(guild, member, count, period);
           }
-
         } catch (error) {
           logger.error(`Error evaluating member ${memberId}:`, error);
         }
@@ -278,7 +280,7 @@ class SummonerManager {
 
       await SummonerPeriod.findByIdAndUpdate(period._id, {
         $set: {
-          status: 'completed',
+          status: "completed",
           evaluationDate: new Date(),
           wasDelayed,
           results,
@@ -293,12 +295,11 @@ class SummonerManager {
         periodNumber: period.periodNumber + 1,
         startDate,
         endDate,
-        status: 'active',
+        status: "active",
         results: [],
       });
-
     } catch (error) {
-      logger.error('Error evaluating period:', error);
+      logger.error("Error evaluating period:", error);
     } finally {
       this.isEvaluating = false;
     }
@@ -316,21 +317,34 @@ class SummonerManager {
       const periodEnd = `<t:${Math.floor(endDate.getTime() / 1000)}:D>`;
 
       const embed = new EmbedBuilder()
-        .setColor(0xFFB84D)
-        .setTitle('Summoner Role Removed')
+        .setColor(0xffb84d)
+        .setTitle("Summoner Role Removed")
         .addFields(
-          { name: 'Member', value: `<@${member.id}>`, inline: false },
-          { name: 'Toothbrush Count', value: `${count}/${config.SUMMONER_THRESHOLD}`, inline: true },
-          { name: 'Period', value: `${periodStart} to ${periodEnd}`, inline: true },
-          { name: 'Reason', value: 'Did not meet the 500 toothbrush threshold', inline: false }
+          { name: "Member", value: `<@${member.id}>`, inline: false },
+          {
+            name: "Toothbrush Count",
+            value: `${count}/${config.SUMMONER_THRESHOLD}`,
+            inline: true,
+          },
+          {
+            name: "Period",
+            value: `${periodStart} to ${periodEnd}`,
+            inline: true,
+          },
+          {
+            name: "Reason",
+            value: "Did not meet the 500 toothbrush threshold",
+            inline: false,
+          },
         )
-        .setFooter({ text: 'Complete 500 toothbrushes in 14 days to keep the role' })
+        .setFooter({
+          text: "Complete 500 toothbrushes in 14 days to keep the role",
+        })
         .setTimestamp();
 
       await channel.send({ embeds: [embed] });
-
     } catch (error) {
-      logger.error('Error sending removal log:', error);
+      logger.error("Error sending removal log:", error);
     }
   }
 

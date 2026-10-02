@@ -2,10 +2,9 @@ const Logger = require("../logger");
 const logger = new Logger("Ready");
 
 module.exports = {
-  name: "ready", // ← CHANGE BACK TO 'ready' (not clientReady)
+  name: "clientReady", // ✅ fixed v15
   once: true,
   execute(client) {
-    console.log("=== READY EVENT FIRED ===");
     logger.info(`✅ Bot logged in as ${client.user.tag}`);
     logger.info(`📊 Serving ${client.guilds.cache.size} guild(s)`);
 
@@ -41,13 +40,9 @@ module.exports = {
       logger.info("✅ Status rotation started!");
 
       if (client.features?.amanTrumpetReminder) {
-        try {
-          client.features.amanTrumpetReminder.initialize();
-          logger.info("🎺 Aman Trumpet Reminder initialized");
-        } catch (error) {
-          logger.error("Error initializing Aman Trumpet Reminder:", error);
-        }
+        client.features.amanTrumpetReminder.initialize();
       }
+
       if (client.features?.inactivityMonitor) {
         client.features.inactivityMonitor.initialize();
       }
