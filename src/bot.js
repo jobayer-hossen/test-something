@@ -21,6 +21,7 @@ const CommandTrackerFeature = require("./features/commandTracker");
 const TimeTravelRolesFeature = require("./features/timeTravelRoles");
 const BeachPartyFeature = require("./features/BeachPartyFeature");
 const EnchantmentWatcher = require("./features/EnchantmentWatcher");
+const FishGodCookingFeature = require("./features/FishGodCookingFeature");
 
 const logger = new Logger("Bot");
 
@@ -557,6 +558,10 @@ class EpicRPGBot {
       this.client.features.beachPartyFeature = new BeachPartyFeature(
         this.client,
       );
+      
+      this.client.features.fishGodCookingFeature = new FishGodCookingFeature(
+        this.client,
+      );
 
       // NEW FEATURES
       this.client.features.activityTracker = new ActivityTracker(this.client);
@@ -570,7 +575,9 @@ class EpicRPGBot {
 
       this.client.features.summonerManager = new SummonerManager(this.client);
 
-      this.client.features.enchantmentWatcher = new EnchantmentWatcher(this.client);
+      this.client.features.enchantmentWatcher = new EnchantmentWatcher(
+        this.client,
+      );
 
       logger.info("✅ All features loaded");
     } catch (err) {

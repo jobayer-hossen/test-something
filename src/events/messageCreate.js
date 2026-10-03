@@ -51,7 +51,6 @@ module.exports = {
           if (client.features?.enchantmentWatcher) {
             await client.features.enchantmentWatcher.handleUserMessage(message);
           }
-
         } catch (error) {
           logger.debug("Error tracking user:", error.message);
         }
@@ -60,24 +59,30 @@ module.exports = {
       // ════════════════════════════════════════
       //   SUMMONER TOOTHBRUSH TRACKING (BOT ONLY)
       // ════════════════════════════════════════
-      if (message.author.id === config.EPIC_RPG_BOT_ID && client.features?.summonerManager) {
+      if (
+        message.author.id === config.EPIC_RPG_BOT_ID &&
+        client.features?.summonerManager
+      ) {
         try {
           const content = message.content.trim();
 
-          if (content.includes('casts a magic spell') &&
-              content.includes('legendary toothbrush')) {
-
+          if (
+            content.includes("casts a magic spell") &&
+            content.includes("legendary toothbrush")
+          ) {
             const nameMatch = content.match(/^\*?\*?(.+?)\*?\*?\s+casts/i);
             if (nameMatch) {
-              const epicRPGName = nameMatch[1].replace(/\*/g, '').trim();
+              const epicRPGName = nameMatch[1].replace(/\*/g, "").trim();
 
               const CommandTracker = require("../database/schemas/CommandTracker");
               const userRecord = await CommandTracker.findOne({
-                username: epicRPGName
+                username: epicRPGName,
               }).lean();
 
               if (userRecord) {
-                await client.features.summonerManager.trackToothbrush(userRecord.userId);
+                await client.features.summonerManager.trackToothbrush(
+                  userRecord.userId,
+                );
               }
             }
           }
@@ -115,7 +120,10 @@ module.exports = {
                 const args = words.slice(1);
                 await channelCommand.execute(message, args, client, firstWord);
               } catch (error) {
-                logger.error(`Error executing channel command ${firstWord}:`, error.message);
+                logger.error(
+                  `Error executing channel command ${firstWord}:`,
+                  error.message,
+                );
               }
             }
             return;
@@ -137,7 +145,10 @@ module.exports = {
           try {
             await moderationCommand.execute(message, args, client, commandName);
           } catch (error) {
-            logger.error(`Error executing moderation command [${commandName}]:`, error.message);
+            logger.error(
+              `Error executing moderation command [${commandName}]:`,
+              error.message,
+            );
             await message.channel
               .send("❌ An error occurred while executing this command!")
               .catch(() => {});
@@ -155,7 +166,10 @@ module.exports = {
           try {
             await command.execute(message, args, client, commandName);
           } catch (error) {
-            logger.error(`Error executing command ${commandName}:`, error.message);
+            logger.error(
+              `Error executing command ${commandName}:`,
+              error.message,
+            );
             await message.channel.send(
               "❌ An error occurred while executing this command!",
             );
@@ -222,11 +236,13 @@ module.exports = {
         if (client.features?.beachPartyFeature) {
           await client.features.beachPartyFeature.handleMessage(message);
         }
-
+        
+        if (client.features.fishGodCookingFeature) {
+          client.features.fishGodCookingFeature.handleMessage(message);
+        }
       } catch (error) {
         logger.error("Error processing message triggers:", error.message);
       }
-
     } catch (error) {
       logger.error("Critical error in messageCreate:", error.message);
     }
