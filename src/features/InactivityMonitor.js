@@ -156,9 +156,9 @@ class InactivityMonitor {
       }
 
       // Send summary if we have a channel
-      if (this.userLogsChannel) {
-        await this.sendSummaryLog(guild, checkLog);
-      }
+      // if (this.userLogsChannel) {
+      //   await this.sendSummaryLog(guild, checkLog);
+      // }
 
     } catch (error) {
       logger.error('Error running inactivity check:', error);

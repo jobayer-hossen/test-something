@@ -1,6 +1,13 @@
+
 const http = require("http");
 const https = require("https");
-const { Client, GatewayIntentBits, Collection } = require("discord.js");
+const {
+  Client,
+  GatewayIntentBits,
+  Collection,
+  Routes,
+  REST,
+} = require("discord.js");
 const fs = require("fs").promises;
 const path = require("path");
 const Logger = require("./logger");
@@ -97,6 +104,10 @@ class EpicRPGBot {
     this.isReady = false;
     this.isDestroyed = false;
 
+    // 🔒 Guards to prevent multiple/overlapping login attempts
+    this.isConnecting = false;
+    this.hasConnectedOnce = false;
+
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 10;
     this.reconnectDelay = 5000;
@@ -113,7 +124,7 @@ class EpicRPGBot {
   }
 
   // ══════════════════════════════════════════
-  // CREATE FRESH CLIENT
+  // CREATE FRESH CLIENT WITH ERROR TRACKING
   // ══════════════════════════════════════════
   createClient() {
     if (this.client) {
@@ -143,8 +154,21 @@ class EpicRPGBot {
     });
 
     this.client.commands = new Collection();
+    this.client.slashCommands = new Collection(); // ✅ Slash commands store
     this.client.features = {};
     this.isReady = false;
+
+    // ✅ INITIALIZE ERROR TRACKING
+    this.client.errorCount = {
+      total: 0,
+      interactions: 0,
+      commands: 0,
+      messages: 0,
+      discord: 0,
+      other: 0,
+      lastError: null,
+      lastErrorTime: null,
+    };
 
     logger.info("🔧 Fresh Discord client created");
     return this.client;
@@ -164,6 +188,12 @@ class EpicRPGBot {
     }
 
     this.cleanToken = cleanToken;
+
+    if (!process.env.CLIENT_ID) {
+      logger.warn(
+        "⚠️ CLIENT_ID not set - Slash commands will not be registered",
+      );
+    }
 
     await this.connectDatabase();
 
@@ -204,10 +234,130 @@ class EpicRPGBot {
   }
 
   // ══════════════════════════════════════════
-  // START BOT (with retry)
+  // LOAD SLASH COMMANDS
+  // ══════════════════════════════════════════
+  async loadSlashCommands() {
+    try {
+      if (!this.client || !this.client.slashCommands) {
+        logger.warn("⚠️ Client not ready for slash commands");
+        return;
+      }
+
+      const slashCommandsPath = path.join(__dirname, "commands", "slash");
+
+      try {
+        await fs.access(slashCommandsPath);
+      } catch {
+        logger.warn(
+          "⚠️ Slash commands directory not found (optional feature)",
+        );
+        return;
+      }
+
+      const slashCommandFiles = await fs.readdir(slashCommandsPath);
+      const jsFiles = slashCommandFiles.filter((f) => f.endsWith(".js"));
+
+      const slashCommandsData = [];
+      let loaded = 0;
+      let failed = 0;
+
+      for (const file of jsFiles) {
+        try {
+          delete require.cache[
+            require.resolve(path.join(slashCommandsPath, file))
+          ];
+          const command = require(path.join(slashCommandsPath, file));
+
+          if (command.data && command.execute) {
+            slashCommandsData.push(command.data.toJSON());
+            this.client.slashCommands.set(command.data.name, command);
+            loaded++;
+          } else {
+            console.warn(
+              `⚠️ Slash command ${file} missing data or execute method`,
+            );
+            failed++;
+          }
+        } catch (err) {
+          console.error(
+            `❌ Failed to load slash command ${file}:`,
+            err.message,
+          );
+          failed++;
+        }
+      }
+
+      logger.info(`✅ Slash Commands: ${loaded} loaded, ${failed} failed`);
+
+      if (loaded > 0 && process.env.CLIENT_ID) {
+        await this.registerSlashCommands(slashCommandsData);
+      } else if (loaded > 0 && !process.env.CLIENT_ID) {
+        console.warn(
+          "⚠️ CLIENT_ID not set, skipping slash command registration",
+        );
+      }
+    } catch (err) {
+      console.error("❌ Slash commands loading error:", err.message);
+    }
+  }
+
+  // ══════════════════════════════════════════
+  // REGISTER SLASH COMMANDS WITH DISCORD
+  // ══════════════════════════════════════════
+  async registerSlashCommands(slashCommandsData) {
+    try {
+      const rest = new REST({ version: "10" }).setToken(this.cleanToken);
+
+      logger.info(
+        `📝 Registering ${slashCommandsData.length} slash commands with Discord...`,
+      );
+
+      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), {
+        body: slashCommandsData,
+      });
+
+      logger.info("✅ Slash commands registered successfully");
+    } catch (error) {
+      console.error("❌ Failed to register slash commands:", error.message);
+
+      if (error.message?.includes("401")) {
+        console.error(
+          "❌ Authentication failed - Check DISCORD_TOKEN and CLIENT_ID",
+        );
+      }
+      if (error.message?.includes("404")) {
+        console.error("❌ Application not found - Check CLIENT_ID");
+      }
+    }
+  }
+
+  // ══════════════════════════════════════════
+  // START BOT (with retry + duplicate-login guard)
   // ══════════════════════════════════════════
   async startBot() {
     if (this.isDestroyed) return;
+
+    // 🔒 Prevent overlapping login attempts
+    if (this.isConnecting) {
+      logger.warn("⚠️ Login already in progress. Skipping duplicate attempt...");
+      return;
+    }
+
+    // 🔒 Already connected right now
+    if (this.client?.isReady?.()) {
+      logger.info("✅ Bot already connected. Skipping login.");
+      return;
+    }
+
+    // 🔒 Already connected once before — Discord.js owns reconnection now
+    if (this.hasConnectedOnce) {
+      logger.info(
+        "🔄 Already connected before — Discord.js is managing Gateway reconnection.",
+      );
+      return;
+    }
+
+    this.isConnecting = true;
 
     try {
       logger.info(
@@ -218,10 +368,12 @@ class EpicRPGBot {
 
       this.loadFeatures();
       await this.loadCommands();
+      await this.loadSlashCommands();
       await this.loadEvents();
 
       this.setupDebugListeners();
       this.setupConnectionListeners();
+      this.setupErrorListeners(); // ✅ NEW: Error tracking
 
       console.log("🔑 Logging into Discord...");
       await this.client.login(this.cleanToken);
@@ -234,8 +386,132 @@ class EpicRPGBot {
         process.exit(1);
       }
 
-      this.scheduleReconnect(`Login error: ${loginError.message}`);
+      if (!this.hasConnectedOnce) {
+        this.scheduleReconnect(`Login error: ${loginError.message}`);
+      } else {
+        logger.warn("⚠️ Discord.js will handle Gateway reconnection.");
+      }
+    } finally {
+      this.isConnecting = false;
     }
+  }
+
+  // ══════════════════════════════════════════
+  // SETUP ERROR LISTENERS (NEW)
+  // ══════════════════════════════════════════
+  setupErrorListeners() {
+    // ✅ Command errors
+    this.client.on("commandError", (error, context) => {
+      this.client.errorCount.total++;
+      this.client.errorCount.commands++;
+      this.client.errorCount.lastError = error.message;
+      this.client.errorCount.lastErrorTime = new Date();
+
+      logger.error(`Command Error [${context?.command}]:`, error.message);
+    });
+
+    // ✅ Interaction errors (slash commands, buttons, etc.)
+    this.client.on("interactionCreate", async (interaction) => {
+      try {
+        if (interaction.isCommand()) {
+          const command = this.client.slashCommands.get(
+            interaction.commandName,
+          );
+          if (!command) return;
+
+          try {
+            await command.execute(interaction);
+          } catch (error) {
+            this.client.errorCount.total++;
+            this.client.errorCount.interactions++;
+            this.client.errorCount.lastError = error.message;
+            this.client.errorCount.lastErrorTime = new Date();
+
+            logger.error(
+              `Slash Command Error [${interaction.commandName}]:`,
+              error.message,
+            );
+
+            try {
+              await interaction.reply({
+                content: "❌ An error occurred while executing this command.",
+                ephemeral: true,
+              });
+            } catch (e) {
+              logger.error("Failed to send error reply:", e.message);
+            }
+          }
+        }
+      } catch (error) {
+        this.client.errorCount.total++;
+        this.client.errorCount.interactions++;
+        logger.error("Interaction handler error:", error.message);
+      }
+    });
+
+    // ✅ Message command errors
+    this.client.on("messageCreate", async (message) => {
+      try {
+        if (message.author.bot || !message.guild) return;
+
+        const prefix = config.PREFIX || "!";
+        if (!message.content.startsWith(prefix)) return;
+
+        const args = message.content.slice(prefix.length).trim().split(/ +/);
+        const commandName = args.shift().toLowerCase();
+        const command = this.client.commands.get(commandName);
+
+        if (!command) return;
+
+        try {
+          await command.execute(message, args, this.client);
+        } catch (error) {
+          this.client.errorCount.total++;
+          this.client.errorCount.messages++;
+          this.client.errorCount.lastError = error.message;
+          this.client.errorCount.lastErrorTime = new Date();
+
+          logger.error(
+            `Message Command Error [${commandName}]:`,
+            error.message,
+          );
+
+          try {
+            await message.reply({
+              content: "❌ An error occurred while executing this command.",
+            });
+          } catch (e) {
+            logger.error("Failed to send error reply:", e.message);
+          }
+        }
+      } catch (error) {
+        this.client.errorCount.total++;
+        this.client.errorCount.messages++;
+        logger.error("Message handler error:", error.message);
+      }
+    });
+
+    // ✅ Discord API errors
+    this.client.rest.on("rateLimited", (info) => {
+      this.client.errorCount.total++;
+      this.client.errorCount.discord++;
+      this.client.errorCount.lastError = `Rate Limited: ${info.route}`;
+      this.client.errorCount.lastErrorTime = new Date();
+
+      console.warn(`⚠️ RATE LIMITED!`);
+      console.warn(`   Route: ${info.method} ${info.route}`);
+      console.warn(`   Retry after: ${info.retryAfter}ms`);
+    });
+
+    // ✅ General client errors
+    this.client.on("error", (error) => {
+      this.client.errorCount.total++;
+      this.client.errorCount.discord++;
+      this.client.errorCount.lastError = error.message;
+      this.client.errorCount.lastErrorTime = new Date();
+
+      logger.error("Client error:", error.message);
+    });
   }
 
   // ══════════════════════════════════════════
@@ -244,12 +520,18 @@ class EpicRPGBot {
   setupConnectionListeners() {
     this.client.once("ready", (client) => {
       this.isReady = true;
+      this.hasConnectedOnce = true;
       this.reconnectAttempts = 0;
       this.stats.lastReadyAt = Date.now();
 
       if (this.readyTimeout) {
         clearTimeout(this.readyTimeout);
         this.readyTimeout = null;
+      }
+
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
       }
 
       const uptime = ((Date.now() - this.stats.startTime) / 1000).toFixed(0);
@@ -305,18 +587,22 @@ class EpicRPGBot {
         process.exit(1);
       }
 
-      setTimeout(() => {
-        if (!this.isReady && !this.isDestroyed) {
-          console.warn(
-            "⚠️ Auto-reconnect didn't work, attempting manual reconnect...",
-          );
-          this.scheduleReconnect(`Shard ${id} stayed disconnected`);
-        }
-      }, 15000);
+      if (!this.hasConnectedOnce) {
+        setTimeout(() => {
+          if (!this.isReady && !this.isDestroyed && !this.hasConnectedOnce) {
+            console.warn(
+              "⚠️ Auto-reconnect didn't work, attempting manual reconnect...",
+            );
+            this.scheduleReconnect(`Shard ${id} stayed disconnected`);
+          }
+        }, 15000);
+      } else {
+        console.log("ℹ️ Discord.js will automatically handle reconnection.");
+      }
     });
 
     this.readyTimeout = setTimeout(() => {
-      if (!this.isReady) {
+      if (!this.isReady && !this.hasConnectedOnce) {
         console.error("❌ READY event never fired in 90 seconds!");
         this.scheduleReconnect("Ready timeout exceeded");
       }
@@ -328,6 +614,13 @@ class EpicRPGBot {
   // ══════════════════════════════════════════
   scheduleReconnect(reason) {
     if (this.isDestroyed) return;
+
+    if (this.hasConnectedOnce) {
+      logger.info(
+        "🔄 Skipping manual reconnect — Discord.js already manages the Gateway.",
+      );
+      return;
+    }
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -368,6 +661,7 @@ class EpicRPGBot {
     console.log("╚══════════════════════════════════════╝");
 
     this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
       console.log(
         `🔄 Executing reconnect attempt ${this.reconnectAttempts}...`,
       );
@@ -415,11 +709,28 @@ class EpicRPGBot {
     process.on("unhandledRejection", (reason, promise) => {
       const msg = reason?.message || String(reason);
       console.error("❌ UNHANDLED REJECTION:", msg.substring(0, 300));
+
+      if (this.client?.errorCount) {
+        this.client.errorCount.total++;
+        this.client.errorCount.other++;
+        this.client.errorCount.lastError = msg;
+        this.client.errorCount.lastErrorTime = new Date();
+      }
     });
 
     process.on("uncaughtException", (error) => {
-      console.error("❌ UNCAUGHT EXCEPTION:", error.message?.substring(0, 300));
+      console.error(
+        "❌ UNCAUGHT EXCEPTION:",
+        error.message?.substring(0, 300),
+      );
       console.error(error.stack?.substring(0, 500));
+
+      if (this.client?.errorCount) {
+        this.client.errorCount.total++;
+        this.client.errorCount.other++;
+        this.client.errorCount.lastError = error.message;
+        this.client.errorCount.lastErrorTime = new Date();
+      }
 
       if (!this.isDestroyed) {
         this.isDestroyed = true;
@@ -558,7 +869,7 @@ class EpicRPGBot {
       this.client.features.beachPartyFeature = new BeachPartyFeature(
         this.client,
       );
-      
+
       this.client.features.fishGodCookingFeature = new FishGodCookingFeature(
         this.client,
       );

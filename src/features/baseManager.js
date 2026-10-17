@@ -1,6 +1,7 @@
-// BaseManager.js - Updated version with category history tracking
+// BaseManager.js - Vanguard, Trusted role, Summoner role + position history tracking
 const PersonalChannel = require("../database/schemas/PersonalChannel");
 const Logger = require("../logger");
+const config = require("../config");
 const { EmbedBuilder } = require("discord.js");
 const logger = new Logger("BaseManager");
 
@@ -15,168 +16,264 @@ class BaseManager {
     this.botRoleId = "970000054012244008";
     this.jailRoleId = "1498459449227083916";
 
+    // Roles that affect personal room category placement
     this.boosterRoleId = "1338629257345241198";
+    this.trustedRoleId = "969999863871832177";
+    this.summonerRoleId = config.SUMMONER_ROLE_ID;
+
+    // Categories
+    this.vanguardCategoryId = "1513214558691659977";
     this.supportersCategoryId = "1513215217578807437";
     this.normalUserCategoryId = "1479929670219858221";
 
+    // Logging
     this.logChannelId = "1503339439777124382";
     this.archiveCategoryId = "1329960246759915632";
 
-    // ONLY these 2 categories are managed for inactivity
-    // Supporters and Normal User users can lose room for inactivity
-    // Any channel outside these 2 = admin/staff placed = never touch for inactivity
-    this.inactivityManagedCategories = [
+    // ALL categories managed (role movement + inactivity)
+    // Any channel outside these = admin/staff placed = never touched
+    this.managedCategories = [
+      this.vanguardCategoryId,
       this.supportersCategoryId,
       this.normalUserCategoryId,
     ];
 
+    this.inactivityManagedCategories = this.managedCategories;
+
     this.startInactivityChecker();
-    this.startBoosterRoleWatcher();
+    this.startRoleWatcher();
   }
 
   // ==========================================
-  // BOOSTER ROLE WATCHER
-  // ONLY moves between supportersCategory
-  // and normalUserCategory - nothing else ever
+  // Priority: Trusted/Summoner > Booster > Normal
   // ==========================================
-  startBoosterRoleWatcher() {
+  determineTargetCategory(member) {
+    const hasTrusted = member.roles.cache.has(this.trustedRoleId);
+    const hasSummoner =
+      this.summonerRoleId && member.roles.cache.has(this.summonerRoleId);
+    const hasBooster = member.roles.cache.has(this.boosterRoleId);
+
+    if (hasTrusted || hasSummoner) return this.vanguardCategoryId;
+    if (hasBooster) return this.supportersCategoryId;
+    return this.normalUserCategoryId;
+  }
+
+  getCategoryName(categoryId) {
+    if (categoryId === this.vanguardCategoryId) return "Vanguard";
+    if (categoryId === this.supportersCategoryId) return "Supporters";
+    if (categoryId === this.normalUserCategoryId) return "Normal User";
+    return "Unknown";
+  }
+
+  // ==========================================
+  // Helper: returns sorted text channels in a category,
+  // using the live guild cache (always fresh, unlike
+  // category.children.cache which can lag behind).
+  // Optionally excludes a specific channel (the one
+  // being moved) so it never pollutes the calculation.
+  // ==========================================
+  async getCategoryChannelsSorted(categoryId, excludeChannelId = null) {
+    const category = await this.client.channels
+      .fetch(categoryId)
+      .catch(() => null);
+    if (!category) return [];
+
+    return category.guild.channels.cache
+      .filter(
+        (ch) =>
+          ch.parentId === categoryId &&
+          ch.type === 0 &&
+          ch.id !== excludeChannelId,
+      )
+      .sort((a, b) => a.position - b.position)
+      .map((ch) => ch);
+  }
+
+  // ==========================================
+  // Shared helper: moves channel to target category,
+  // restoring previous index in that category if we
+  // have history for it — otherwise pushes to bottom.
+  // Saves history of the category being left, logs the move.
+  // ==========================================
+  async moveChannelToCategory(channel, targetCategoryId, member, reasonText) {
+    try {
+      const previousCategoryId = channel.parentId;
+
+      // 1. Figure out the channel's current index in the category it's leaving
+      //    (so we can remember it for next time it needs to go back there)
+      const siblingsBefore = await this.getCategoryChannelsSorted(
+        previousCategoryId,
+        channel.id,
+      );
+      let previousIndex = siblingsBefore.findIndex(
+        (ch) => ch.position > channel.position,
+      );
+      if (previousIndex === -1) previousIndex = siblingsBefore.length;
+
+      // 2. Check if we have a saved index for the TARGET category
+      const roomData = await PersonalChannel.findOne({ userId: member.id });
+      const history =
+        (roomData && roomData.categoryPositionHistory) || {};
+      const savedIndex = history[targetCategoryId];
+
+      // 3. Actually move the channel
+      await channel.setParent(targetCategoryId, { lockPermissions: false });
+
+      // 4. Get fresh sibling list in the new category (excluding self)
+      const siblingsAfter = await this.getCategoryChannelsSorted(
+        targetCategoryId,
+        channel.id,
+      );
+
+      let newPosition;
+
+      if (
+        savedIndex !== undefined &&
+        savedIndex !== null &&
+        savedIndex < siblingsAfter.length
+      ) {
+        // Restore to the previously known spot
+        newPosition = siblingsAfter[savedIndex].position;
+        logger.info(
+          `[ROLE WATCHER] Restoring #${channel.name} to previous index ${savedIndex} in ${this.getCategoryName(targetCategoryId)}`,
+        );
+      } else {
+        // No history (or it's now out of range) — push to the bottom
+        newPosition =
+          siblingsAfter.length > 0
+            ? siblingsAfter[siblingsAfter.length - 1].position + 1
+            : 0;
+      }
+
+      await channel.setPosition(newPosition);
+
+      // 5. Save history: remember index in the category just left,
+      //    update current/previous category pointers
+      await PersonalChannel.findOneAndUpdate(
+        { userId: member.id },
+        {
+          $set: {
+            categoryId: targetCategoryId,
+            previousCategoryId,
+            [`categoryPositionHistory.${previousCategoryId}`]: previousIndex,
+          },
+        },
+      );
+
+      logger.info(
+        `[ROLE WATCHER] #${channel.name} → ${this.getCategoryName(targetCategoryId)} for ${member.user.username} (${reasonText})`,
+      );
+
+      const logChannel = await this.client.channels
+        .fetch(this.logChannelId)
+        .catch(() => null);
+
+      if (logChannel) {
+        await logChannel
+          .send({
+            content: `📦 <@${member.id}> ${reasonText}. Personal room <#${channel.id}> moved to **${this.getCategoryName(targetCategoryId)}** category.`,
+          })
+          .catch(() => null);
+      }
+    } catch (err) {
+      logger.error(`[MOVE CHANNEL ERROR] ${err.message}`);
+    }
+  }
+
+  // ==========================================
+  // UNIFIED ROLE WATCHER
+  // Watches Booster, Trusted, and Summoner roles.
+  // ==========================================
+  startRoleWatcher() {
     this.client.on("guildMemberUpdate", async (oldMember, newMember) => {
       try {
-        const hadBooster = oldMember.roles.cache.has(this.boosterRoleId);
-        const hasBooster = newMember.roles.cache.has(this.boosterRoleId);
+        const watchedRoles = [
+          this.boosterRoleId,
+          this.trustedRoleId,
+          this.summonerRoleId,
+        ].filter(Boolean);
 
-        // No booster change - ignore completely
-        if (hadBooster === hasBooster) return;
+        const changed = watchedRoles.some(
+          (roleId) =>
+            oldMember.roles.cache.has(roleId) !==
+            newMember.roles.cache.has(roleId),
+        );
 
-        // Find personal room in DB
+        if (!changed) return;
+
         const roomData = await PersonalChannel.findOne({
           userId: newMember.id,
         });
-
-        // No room = nothing to do
         if (!roomData) return;
 
-        // Fetch the actual Discord channel
         const channel = await this.client.channels
           .fetch(roomData.channelId)
           .catch(() => null);
-
         if (!channel) return;
 
         const currentCategoryId = channel.parentId;
 
-        const logChannel = await this.client.channels
-          .fetch(this.logChannelId)
-          .catch(() => null);
-
-        // ==========================================
-        // BOOSTER LOST
-        // ONLY act if channel is in supportersCategoryId
-        // Move to normal category and save history
-        // ==========================================
-        if (hadBooster && !hasBooster) {
-          if (currentCategoryId !== this.supportersCategoryId) {
-            logger.info(
-              `[BOOSTER LOST] Skipping #${channel.name} — not in supporters category. Never touching.`,
-            );
-            return;
-          }
-
-          // Save previous category in history before moving
-          await PersonalChannel.findOneAndUpdate(
-            { userId: newMember.id },
-            {
-              categoryId: this.normalUserCategoryId,
-              previousCategoryId: this.supportersCategoryId,
-            },
-          );
-
-          // Move to normal category
-          await channel.setParent(this.normalUserCategoryId, {
-            lockPermissions: false,
-          });
-
-          // ✅ Move to bottom of category
-          const category = await this.client.channels.fetch(
-            this.normalUserCategoryId,
-          );
-          const channelsInCategory = category.children.cache
-            .filter((ch) => ch.type === 0) // Only text channels
-            .sort((a, b) => a.position - b.position);
-
-          const lastPosition = channelsInCategory.last()?.position || 0;
-          await channel.setPosition(lastPosition + 1);
-
+        if (!this.managedCategories.includes(currentCategoryId)) {
           logger.info(
-            `[BOOSTER LOST] #${channel.name} → Normal User Category (bottom) for ${newMember.user.username}`,
+            `[ROLE WATCHER] Skipping #${channel.name} — not in a managed category (${currentCategoryId}). Never touching.`,
           );
-
-          if (logChannel) {
-            await logChannel.send({
-              content: `📦 <@${newMember.id}> lost their **Server Booster** role. Personal room <#${channel.id}> has been moved to the normal user category.`,
-            });
-          }
+          return;
         }
 
-        // ==========================================
-        // BOOSTER GAINED
-        // ONLY act if channel is in normalUserCategoryId
-        // Move to supporters category and save history
-        // ==========================================
-        if (!hadBooster && hasBooster) {
-          if (currentCategoryId !== this.normalUserCategoryId) {
-            logger.info(
-              `[BOOSTER GAINED] Skipping #${channel.name} — not in normal user category. Never touching.`,
-            );
-            return;
-          }
+        const targetCategoryId = this.determineTargetCategory(newMember);
 
-          // Save previous category in history before moving
-          await PersonalChannel.findOneAndUpdate(
-            { userId: newMember.id },
-            {
-              categoryId: this.supportersCategoryId,
-              previousCategoryId: this.normalUserCategoryId,
-            },
-          );
+        if (targetCategoryId === currentCategoryId) return;
 
-          // Move to supporters category
-          await channel.setParent(this.supportersCategoryId, {
-            lockPermissions: false,
-          });
+        let reasonText = "had a role update";
 
-          // ✅ Move to bottom of category
-          const category = await this.client.channels.fetch(
-            this.supportersCategoryId,
-          );
-          const channelsInCategory = category.children.cache
-            .filter((ch) => ch.type === 0) // Only text channels
-            .sort((a, b) => a.position - b.position);
-
-          const lastPosition = channelsInCategory.last()?.position || 0;
-          await channel.setPosition(lastPosition + 1);
-
-          logger.info(
-            `[BOOSTER GAINED] #${channel.name} → Supporters Category (bottom) for ${newMember.user.username}`,
-          );
-
-          if (logChannel) {
-            await logChannel.send({
-              content: `⭐ <@${newMember.id}> boosted the server! Personal room <#${channel.id}> has been moved back to the supporters category.`,
-            });
-          }
+        if (
+          newMember.roles.cache.has(this.trustedRoleId) &&
+          !oldMember.roles.cache.has(this.trustedRoleId)
+        ) {
+          reasonText = "gained the Trusted role";
+        } else if (
+          !newMember.roles.cache.has(this.trustedRoleId) &&
+          oldMember.roles.cache.has(this.trustedRoleId)
+        ) {
+          reasonText = "lost the Trusted role";
+        } else if (
+          this.summonerRoleId &&
+          newMember.roles.cache.has(this.summonerRoleId) &&
+          !oldMember.roles.cache.has(this.summonerRoleId)
+        ) {
+          reasonText = "gained the Summoner role";
+        } else if (
+          this.summonerRoleId &&
+          !newMember.roles.cache.has(this.summonerRoleId) &&
+          oldMember.roles.cache.has(this.summonerRoleId)
+        ) {
+          reasonText = "lost the Summoner role";
+        } else if (
+          newMember.roles.cache.has(this.boosterRoleId) &&
+          !oldMember.roles.cache.has(this.boosterRoleId)
+        ) {
+          reasonText = "boosted the server";
+        } else if (
+          !newMember.roles.cache.has(this.boosterRoleId) &&
+          oldMember.roles.cache.has(this.boosterRoleId)
+        ) {
+          reasonText = "lost the Booster role";
         }
+
+        await this.moveChannelToCategory(
+          channel,
+          targetCategoryId,
+          newMember,
+          reasonText,
+        );
       } catch (err) {
-        logger.error(`[BOOSTER WATCHER ERROR] ${err.message}`);
+        logger.error(`[ROLE WATCHER ERROR] ${err.message}`);
       }
     });
   }
 
   // ==========================================
   // INACTIVITY CHECKER - Every hour
-  // ONLY checks channels in supporters OR
-  // normal user category
-  // Staff/admin channels = never touched
   // ==========================================
   startInactivityChecker() {
     setInterval(async () => {
@@ -192,7 +289,6 @@ class BaseManager {
             .fetch(room.channelId)
             .catch(() => null);
 
-          // Channel deleted from Discord but still in DB - clean up DB
           if (!channel) {
             await PersonalChannel.deleteOne({ userId: room.userId });
             logger.info(
@@ -203,11 +299,6 @@ class BaseManager {
 
           const currentCategoryId = channel.parentId;
 
-          // ==========================================
-          // CRITICAL SAFETY CHECK
-          // Only remove rooms in supporters or normal user category
-          // Admin/staff channels = NEVER touched for inactivity
-          // ==========================================
           if (!this.inactivityManagedCategories.includes(currentCategoryId)) {
             logger.info(
               `[INACTIVITY] Skipping #${channel.name} — in unmanaged category (${currentCategoryId}). Admin/staff channel, never touching.`,
@@ -224,7 +315,6 @@ class BaseManager {
             .fetch(room.userId)
             .catch(() => null);
 
-          // 1. DM the user FIRST (before archiving)
           if (user) {
             const dmEmbed = new EmbedBuilder()
               .setColor("#FF4742")
@@ -258,7 +348,6 @@ class BaseManager {
             await user.send({ embeds: [dmEmbed] }).catch(() => null);
           }
 
-          // 2. Remove owner role from user
           if (member) {
             await member.roles.remove(this.ownerRoleId).catch((err) => {
               logger.error(
@@ -270,18 +359,18 @@ class BaseManager {
             );
           }
 
-          // 3. Log to channel BEFORE archiving (non-clickable channel name)
           const logChannel = await this.client.channels
             .fetch(this.logChannelId)
             .catch(() => null);
 
           if (logChannel) {
-            await logChannel.send({
-              content: `❌ <@${room.userId}> lost their personal room \`${channel.name}\` after 7 days of inactivity.\n📩 Write in <#1509133186645495868> if you want a new one when you return.\n🛡️ **Spanac guild** members can contact an admin to automatically receive a new channel again.`,
-            });
+            await logChannel
+              .send({
+                content: `❌ <@${room.userId}> lost their personal room \`${channel.name}\` after 7 days of inactivity.\n📩 Write in <#1509133186645495868> if you want a new one when you return.`,
+              })
+              .catch(() => null);
           }
 
-          // 4. NOW move to archive and lock
           await channel.setParent(this.archiveCategoryId, {
             lockPermissions: false,
           });
@@ -305,7 +394,6 @@ class BaseManager {
             },
           ]);
 
-          // 5. Remove from database
           await PersonalChannel.deleteOne({ userId: room.userId });
 
           logger.info(
@@ -315,7 +403,7 @@ class BaseManager {
           logger.error(`[INACTIVITY ERROR] ${err.message}`);
         }
       }
-    }, 3600000); // Every hour
+    }, 3600000);
   }
 }
 

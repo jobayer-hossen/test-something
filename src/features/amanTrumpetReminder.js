@@ -20,6 +20,9 @@ const TRACKED_USERS = [
   {
     userId: "221556816390258688", // ichigo271 user ID
   },
+  {
+    userId: "624732352030965779", // kellllzz user ID
+  },
 ];
 
 class AmanTrumpetReminder {
@@ -106,7 +109,7 @@ class AmanTrumpetReminder {
       const userData = await AmanCoinMention.findOne({ userId });
 
       if (!userData || !userData.lastUsed) {
-        logger.debug(`No usage data found for user ${userId}`);
+        // logger.debug(`No usage data found for user ${userId}`);
         return;
       }
 
