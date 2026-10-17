@@ -270,8 +270,7 @@ module.exports = {
 
     let status = `**Health Score:** \`${healthPercent}%\`\n`;
     status += `**Ready State:** ${checks.ready ? "✅ Ready" : "❌ Not Ready"}\n`;
-    status += `**Connected:** ${checks.connected ? "✅ Connected" : "❌ Disconnected"}\n`;
-    status += `**Heartbeat:** ${checks.noMissedHeartbeats ? "✅ ACK" : "❌ Missed"}`;
+    status += `**Connected:** ${checks.connected ? "✅ Connected" : "❌ Disconnected"}`;
 
     const color =
       healthPercent === 100
