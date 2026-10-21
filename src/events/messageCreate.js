@@ -282,6 +282,8 @@ async function handleFeatureTriggers(message, client, logger) {
     // OWNER MENTION STICKER RESPONSE
     // ════════════════════════════════════════
     const ownerID = "782630678389981244";
+    const EXCLUDED_CATEGORY_ID = "1502453767847809195"; // staff-chat category
+
     const isDirectMention =
       message.mentions.users.has(ownerID) &&
       message.reference === null &&
@@ -291,7 +293,15 @@ async function handleFeatureTriggers(message, client, logger) {
       message.content.includes(`<@${ownerID}>`) ||
       message.content.includes(`<@!${ownerID}>`);
 
-    if (isDirectMention && containsIdLiteral) {
+    // Get category ID (handles threads too, in case channel is a thread)
+    const categoryId =
+      message.channel.parentId && message.channel.isThread?.()
+        ? message.channel.parent?.parentId
+        : message.channel.parentId;
+
+    const isInExcludedCategory = categoryId === EXCLUDED_CATEGORY_ID;
+
+    if (isDirectMention && containsIdLiteral && !isInExcludedCategory) {
       const stickers = [
         "https://cdn.discordapp.com/emojis/1472947968821694466.webp?size=96",
         "https://cdn.discordapp.com/emojis/1472948142591971462.webp?size=96",
