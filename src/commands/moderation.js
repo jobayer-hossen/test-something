@@ -1,5 +1,10 @@
 // commands/moderation.js
-const { EmbedBuilder } = require("discord.js");
+const {
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+} = require("discord.js");
 const mongoose = require("mongoose");
 const Logger = require("../logger");
 
@@ -17,15 +22,29 @@ const ROLE_LEVELS = {
   "1470791812733075637": 1, // Support Syndicate — warn + timeout only
 };
 
+const JAIL_ROLE_ID     = "1498459449227083916"; // Jail role
+const INITIATE_ROLE_ID = "1330560814536589433"; // role removed on jail, restored on unjail/pardon
+
+// Auto-Jail escalation
+const AUTO_JAIL_WARN_THRESHOLD = 3;    // auto-jail when a member hits exactly this many ACTIVE warnings
+const AUTO_JAIL_DURATION       = "2h"; // duration string parsed via parseDuration()
+
 const LEVEL_COMMANDS = {
-  1: ["warn", "timeout", "modlogs", "case", "modhelp"],
-  3: ["warn", "kick", "ban", "timeout", "unwarn", "modlogs", "case", "modhelp"],
+  1: ["warn", "timeout", "modlogs", "case", "modhelp", "warnings"],
+  3: [
+    "warn", "kick", "ban", "timeout", "unwarn", "modlogs", "case", "modhelp",
+    "warnings", "jail", "unjail", "pardon",
+  ],
 };
 
 const MOD_COMMANDS = [
-  "warn", "kick", "ban", "timeout",
-  "unwarn", "modlogs", "modhelp", "case",
+  "warn", "kick", "ban", "timeout", "unwarn", "modlogs", "modhelp",
+  "case", "warnings", "mh", "jail", "unjail", "pardon",
 ];
+
+const COMMAND_ALIASES = {
+  mh: "modhelp",
+};
 
 // ════════════════════════════════════════════
 //         DATABASE SCHEMA (mod cases only)
@@ -36,7 +55,10 @@ const moderationLogSchema = new mongoose.Schema(
     guildId:           { type: String, required: true, index: true },
     action: {
       type: String,
-      enum: ["WARN", "KICK", "BAN", "TIMEOUT", "UNBAN", "UNWARN", "UNTIMEOUT"],
+      enum: [
+        "WARN", "KICK", "BAN", "TIMEOUT", "UNBAN", "UNWARN", "UNTIMEOUT",
+        "JAIL", "UNJAIL",
+      ],
       required: true,
     },
     userId:            { type: String, required: true, index: true },
@@ -46,7 +68,6 @@ const moderationLogSchema = new mongoose.Schema(
     moderatorUsername: { type: String, required: true },
     moderatorTag:      { type: String, required: true },
     reason:            { type: String, default: "No reason provided" },
-    // Only store evidence IF moderator replied to a message
     evidence: {
       messageContent: String,
       messageId:      String,
@@ -61,6 +82,13 @@ const moderationLogSchema = new mongoose.Schema(
     commandChannelId: { type: String,  default: null },
     commandMessageId: { type: String,  default: null },
     active:           { type: Boolean, default: true },
+
+    // Removal tracking (UNWARN / UNTIMEOUT / UNBAN / UNJAIL / pardons)
+    removedAt:        { type: Date,    default: null },
+    removedBy:        { type: String,  default: null },
+    removedByTag:     { type: String,  default: null },
+    removalReason:    { type: String,  default: null },
+    relatedCaseId:    { type: Number,  default: null },
   },
   { timestamps: true }
 );
@@ -125,6 +153,11 @@ function parseDuration(str) {
   const ms = value * multipliers[unit];
   if (ms > 28 * 24 * 60 * 60 * 1_000 || ms < 1_000) return null;
   return ms;
+}
+
+// Same as parseDuration but allows longer sentences for Jail (up to 28d anyway per spec: 30m..14d)
+function parseJailDuration(str) {
+  return parseDuration(str);
 }
 
 function formatDuration(ms) {
@@ -192,18 +225,25 @@ async function getCaseById(guildId, caseId) {
   return ModerationLog.findOne({ guildId, caseId });
 }
 
-async function deactivateCase(guildId, caseId) {
+async function deactivateCase(guildId, caseId, removalInfo = {}) {
   const ModerationLog = getModerationLog();
+  const { removedBy, removedByTag, removalReason } = removalInfo;
+
   return ModerationLog.findOneAndUpdate(
     { guildId, caseId },
-    { active: false },
+    {
+      active:        false,
+      removedAt:     new Date(),
+      removedBy:     removedBy     || null,
+      removedByTag:  removedByTag  || null,
+      removalReason: removalReason || null,
+    },
     { new: true }
   );
 }
 
 // ════════════════════════════════════════════
 //    EVIDENCE — only from replied message
-//    No database storing. Fetch live only.
 // ════════════════════════════════════════════
 async function extractEvidence(message) {
   if (!message.reference?.messageId) return null;
@@ -221,7 +261,6 @@ async function extractEvidence(message) {
       attachments:    [...refMsg.attachments.values()].map((a) => a.url),
     };
   } catch {
-    // Message was deleted or not fetchable — just skip
     return null;
   }
 }
@@ -243,20 +282,20 @@ function buildJumpLink(guildId, channelId, messageId) {
 //              ACTION CONFIG
 // ════════════════════════════════════════════
 const ACTION_META = {
-  WARN:      { color: 0xFFAA00, emoji: "⚠️", label: "Warning Issued",   dmTitle: "You Have Been Warned",     verb: "warned"    },
-  KICK:      { color: 0xFF6B00, emoji: "👢", label: "Member Kicked",    dmTitle: "You Have Been Kicked",     verb: "kicked"    },
-  BAN:       { color: 0xFF0000, emoji: "🔨", label: "Member Banned",    dmTitle: "You Have Been Banned",     verb: "banned"    },
-  TIMEOUT:   { color: 0xFF8C00, emoji: "🔇", label: "Member Timed Out", dmTitle: "You Have Been Timed Out",  verb: "timed out" },
-  UNBAN:     { color: 0x2ECC71, emoji: "✅", label: "Member Unbanned",  dmTitle: "You Have Been Unbanned",   verb: "unbanned"  },
-  UNWARN:    { color: 0x2ECC71, emoji: "✅", label: "Warning Removed",  dmTitle: "A Warning Was Removed",    verb: "unwarned"  },
-  UNTIMEOUT: { color: 0x2ECC71, emoji: "🔊", label: "Timeout Removed",  dmTitle: "Your Timeout Was Removed", verb: "untimedout"},
+  WARN:      { color: 0xFFAA00, emoji: "⚠️", label: "Warning Issued",            dmTitle: "You Have Been Warned",      verb: "warned"            },
+  KICK:      { color: 0xFF6B00, emoji: "👢", label: "Member Kicked",             dmTitle: "You Have Been Kicked",      verb: "kicked"            },
+  BAN:       { color: 0xFF0000, emoji: "🔨", label: "Member Banned",             dmTitle: "You Have Been Banned",      verb: "banned"            },
+  TIMEOUT:   { color: 0xFF8C00, emoji: "🔇", label: "Member Timed Out",          dmTitle: "You Have Been Timed Out",   verb: "timed out"         },
+  UNBAN:     { color: 0x2ECC71, emoji: "✅", label: "Member Unbanned",           dmTitle: "You Have Been Unbanned",    verb: "unbanned"          },
+  UNWARN:    { color: 0x2ECC71, emoji: "✅", label: "Warning Removed",           dmTitle: "A Warning Was Removed",     verb: "unwarned"          },
+  UNTIMEOUT: { color: 0x2ECC71, emoji: "🔊", label: "Timeout Removed",           dmTitle: "Your Timeout Was Removed",  verb: "untimedout"        },
+  JAIL:      { color: 0x8B0000, emoji: "⛓️", label: "Member Jailed",             dmTitle: "You Have Been Jailed",      verb: "jailed"            },
+  UNJAIL:    { color: 0x2ECC71, emoji: "🔓", label: "Member Released From Jail", dmTitle: "You Have Been Released",    verb: "released from Jail"},
 };
 
 // ════════════════════════════════════════════
 //              EMBED BUILDERS
 // ════════════════════════════════════════════
-
-// ── DM to the punished user ──
 function buildDMEmbed({ action, guild, moderator, reason, caseId, duration, totalWarns, evidence }) {
   const meta = ACTION_META[action];
 
@@ -281,7 +320,6 @@ function buildDMEmbed({ action, guild, moderator, reason, caseId, duration, tota
     embed.addFields({ name: "Total Warnings", value: `${totalWarns}`, inline: false });
   }
 
-  // Only show evidence if moderator replied to a message
   if (evidence?.messageContent) {
     embed.addFields({
       name:  "Related Message",
@@ -295,6 +333,7 @@ function buildDMEmbed({ action, guild, moderator, reason, caseId, duration, tota
     KICK:    "You may rejoin the server if you agree to follow the rules.",
     BAN:     "If you believe this was a mistake, you may appeal using the link below.",
     TIMEOUT: "You will be able to chat again once your timeout expires.",
+    JAIL:    "You will be released automatically once your sentence ends, or sooner if pardoned.",
   };
 
   if (advice[action]) {
@@ -310,7 +349,6 @@ function buildDMEmbed({ action, guild, moderator, reason, caseId, duration, tota
   return embed;
 }
 
-// ── Log embed for mod-log channel ──
 function buildLogEmbed({ action, caseId, targetUser, moderator, reason, duration, evidence, totalWarns, history, commandLink }) {
   const meta = ACTION_META[action];
 
@@ -346,7 +384,6 @@ function buildLogEmbed({ action, caseId, targetUser, moderator, reason, duration
     embed.addFields({ name: "Command Used", value: `[Jump to message](${commandLink})`, inline: false });
   }
 
-  // Evidence only if mod replied to a message
   if (evidence?.messageContent) {
     embed.addFields({
       name:  "Evidence",
@@ -367,7 +404,6 @@ function buildLogEmbed({ action, caseId, targetUser, moderator, reason, duration
     });
   }
 
-  // Prior cases summary
   if (history?.length > 1) {
     const prior = history
       .slice(0, 5)
@@ -390,7 +426,6 @@ function buildLogEmbed({ action, caseId, targetUser, moderator, reason, duration
   return embed;
 }
 
-// ── Confirm embed in command channel ──
 function buildConfirmEmbed({ action, targetUser, reason, caseId, duration, totalWarns }) {
   const meta = ACTION_META[action];
 
@@ -415,12 +450,12 @@ function buildConfirmEmbed({ action, targetUser, reason, caseId, duration, total
   return embed;
 }
 
-// ── History embed ──
 function buildHistoryEmbed({ targetUser, history, guild }) {
   const activeWarns   = history.filter((h) => h.action === "WARN"    && h.active).length;
   const totalBans     = history.filter((h) => h.action === "BAN"    ).length;
   const totalKicks    = history.filter((h) => h.action === "KICK"   ).length;
   const totalTimeouts = history.filter((h) => h.action === "TIMEOUT").length;
+  const totalJails    = history.filter((h) => h.action === "JAIL"   ).length;
 
   const embed = new EmbedBuilder()
     .setColor(history.length > 0 ? 0xFF6B00 : 0x2ECC71)
@@ -432,9 +467,10 @@ function buildHistoryEmbed({ targetUser, history, guild }) {
       { name: "Kicks",           value: `${totalKicks}`,     inline: true },
       { name: "Bans",            value: `${totalBans}`,      inline: true },
       { name: "Timeouts",        value: `${totalTimeouts}`,  inline: true },
+      { name: "Jails",           value: `${totalJails}`,     inline: true },
       { name: "Total Cases",     value: `${history.length}`, inline: true },
     )
-    .setFooter({ text: guild.name })
+    .setFooter({ text: `${guild.name} • Use "eb warnings @user" for full warning details` })
     .setTimestamp();
 
   if (history.length === 0) {
@@ -466,6 +502,8 @@ function buildHistoryEmbed({ targetUser, history, guild }) {
 // ════════════════════════════════════════════
 //              SMALL HELPERS
 // ════════════════════════════════════════════
+const NO_PING = { parse: [], repliedUser: false };
+
 function errEmbed(title, desc) {
   return new EmbedBuilder()
     .setColor(0xFF0000)
@@ -482,8 +520,174 @@ function usageEmbed(lines, extraFields = []) {
   return embed;
 }
 
-async function respond(message, embeds) {
-  return message.channel.send({ embeds }).catch(() => {});
+// All replies go through here — guarantees the invoking mod/admin is NEVER pinged,
+// and no stray mention in embed-adjacent content triggers a ping either.
+async function respond(message, embeds, extra = {}) {
+  return message.channel.send({ embeds, allowedMentions: NO_PING, ...extra }).catch(() => {});
+}
+
+async function logSend(channel, embeds, extra = {}) {
+  if (!channel) return null;
+  return channel.send({ embeds, allowedMentions: NO_PING, ...extra }).catch(() => null);
+}
+
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+async function sendPaginated(message, totalPages, buildEmbed) {
+  let pageIndex = 0;
+
+  const buildRow = (idx) => new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("modpage_prev")
+      .setLabel("◀ Previous")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(idx === 0),
+    new ButtonBuilder()
+      .setCustomId("modpage_next")
+      .setLabel("Next ▶")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(idx === totalPages - 1),
+  );
+
+  const sent = await message.channel.send({
+    embeds: [buildEmbed(pageIndex)],
+    components: totalPages > 1 ? [buildRow(pageIndex)] : [],
+    allowedMentions: NO_PING,
+  }).catch(() => null);
+
+  if (!sent || totalPages <= 1) return sent;
+
+  const collector = sent.createMessageComponentCollector({
+    filter: (i) => i.user.id === message.author.id,
+    time: 120_000,
+  });
+
+  collector.on("collect", async (interaction) => {
+    if (interaction.customId === "modpage_prev") pageIndex = Math.max(0, pageIndex - 1);
+    if (interaction.customId === "modpage_next") pageIndex = Math.min(totalPages - 1, pageIndex + 1);
+
+    await interaction.update({
+      embeds: [buildEmbed(pageIndex)],
+      components: [buildRow(pageIndex)],
+      allowedMentions: NO_PING,
+    }).catch(() => {});
+  });
+
+  collector.on("end", () => {
+    sent.edit({ components: [] }).catch(() => {});
+  });
+
+  return sent;
+}
+
+// ════════════════════════════════════════════
+//         JAIL — AUTO-RELEASE SCHEDULER
+// ════════════════════════════════════════════
+const activeJailTimers = new Map(); // `${guildId}:${userId}` -> Timeout handle
+
+function jailTimerKey(guildId, userId) {
+  return `${guildId}:${userId}`;
+}
+
+function clearJailTimer(guildId, userId) {
+  const key = jailTimerKey(guildId, userId);
+  if (activeJailTimers.has(key)) {
+    clearTimeout(activeJailTimers.get(key));
+    activeJailTimers.delete(key);
+  }
+}
+
+function scheduleJailRelease(client, guildId, userId, caseId, ms) {
+  clearJailTimer(guildId, userId);
+  // setTimeout max ~24.8 days; jail sentences can go up to 28d — the periodic
+  // sweep below acts as a fallback for anything beyond this safe cap.
+  const safeMs = Math.min(ms, 2_147_000_000);
+  const timer = setTimeout(() => {
+    releaseJail(client, guildId, userId, caseId, "Jail sentence expired");
+  }, safeMs);
+  activeJailTimers.set(jailTimerKey(guildId, userId), timer);
+}
+
+async function releaseJail(client, guildId, userId, caseId, reason = "Jail sentence expired") {
+  try {
+    const modCase = await getCaseById(guildId, caseId);
+    if (!modCase || !modCase.active) {
+      clearJailTimer(guildId, userId);
+      return; // already released/pardoned
+    }
+
+    const guild  = await client.guilds.fetch(guildId).catch(() => null);
+    const member = guild ? await guild.members.fetch(userId).catch(() => null) : null;
+
+    await deactivateCase(guildId, caseId, {
+      removedBy:     client.user.id,
+      removedByTag:  client.user.tag,
+      removalReason: reason,
+    });
+
+    if (member) {
+      await member.roles.remove(JAIL_ROLE_ID).catch(() => {});
+      if (INITIATE_ROLE_ID && INITIATE_ROLE_ID !== "PUT_INITIATE_ROLE_ID_HERE") {
+        await member.roles.add(INITIATE_ROLE_ID).catch(() => {});
+      }
+    }
+
+    const targetUser = member?.user ?? { id: userId, username: modCase.username, tag: modCase.userTag };
+
+    const releaseCase = await createCase({
+      guildId, action: "UNJAIL", targetUser, moderator: client.user, reason,
+    });
+    await releaseCase.updateOne({ relatedCaseId: caseId });
+
+    if (guild) {
+      const logChannel = guild.channels.cache.get(MOD_LOG_CHANNEL_ID);
+      await logSend(logChannel, [buildLogEmbed({
+        action: "UNJAIL", caseId: releaseCase.caseId, targetUser,
+        moderator: client.user, reason,
+      })]);
+    }
+
+    if (member) {
+      try {
+        await member.send({ embeds: [buildDMEmbed({
+          action: "UNJAIL", guild, moderator: client.user, reason, caseId: releaseCase.caseId,
+        })] });
+      } catch (_) {}
+    }
+  } catch (err) {
+    logger.error(`Failed to auto-release jail (${guildId}/${userId}): ${err.message}`);
+  } finally {
+    clearJailTimer(guildId, userId);
+  }
+}
+
+// Called on startup and every few minutes — releases anything overdue and
+// re-arms in-memory timers for anything still active (covers bot restarts).
+async function sweepExpiredJails(client) {
+  try {
+    const ModerationLog = getModerationLog();
+
+    const expired = await ModerationLog.find({
+      action: "JAIL", active: true, expiresAt: { $lte: new Date() },
+    });
+    for (const j of expired) {
+      await releaseJail(client, j.guildId, j.userId, j.caseId, "Jail sentence expired");
+    }
+
+    const stillActive = await ModerationLog.find({ action: "JAIL", active: true });
+    for (const j of stillActive) {
+      const key = jailTimerKey(j.guildId, j.userId);
+      if (activeJailTimers.has(key)) continue;
+      const msLeft = new Date(j.expiresAt).getTime() - Date.now();
+      if (msLeft > 0) scheduleJailRelease(client, j.guildId, j.userId, j.caseId, msLeft);
+    }
+  } catch (err) {
+    logger.error(`Jail sweep failed: ${err.message}`);
+  }
 }
 
 // ════════════════════════════════════════════
@@ -491,6 +695,71 @@ async function respond(message, embeds) {
 // ════════════════════════════════════════════
 
 // ── WARN ──────────────────────────────────
+async function autoJailOnWarnThreshold(message, targetMember, totalWarns, client) {
+  if (totalWarns !== AUTO_JAIL_WARN_THRESHOLD) return;
+
+  const ModerationLog = getModerationLog();
+  const alreadyJailed = await ModerationLog.findOne({
+    guildId: message.guild.id, userId: targetMember.id, action: "JAIL", active: true,
+  });
+  if (alreadyJailed) return;
+
+  if (!message.guild.members.me.permissions.has("ManageRoles")) {
+    logger.error("Auto-jail skipped: bot lacks ManageRoles permission.");
+    return;
+  }
+
+  const jailRole = message.guild.roles.cache.get(JAIL_ROLE_ID);
+  if (!jailRole || jailRole.position >= message.guild.members.me.roles.highest.position) {
+    logger.error("Auto-jail skipped: Jail role missing or positioned above bot's highest role.");
+    return;
+  }
+
+  const durationMs        = parseDuration(AUTO_JAIL_DURATION);
+  const durationFormatted = formatDuration(durationMs);
+  const reason            = `Automatic Jail — reached ${totalWarns} active warnings`;
+
+  try {
+    if (INITIATE_ROLE_ID && INITIATE_ROLE_ID !== "PUT_INITIATE_ROLE_ID_HERE" &&
+        targetMember.roles.cache.has(INITIATE_ROLE_ID)) {
+      await targetMember.roles.remove(INITIATE_ROLE_ID).catch(() => {});
+    }
+    await targetMember.roles.add(JAIL_ROLE_ID);
+  } catch (err) {
+    logger.error(`Auto-jail role update failed: ${err.message}`);
+    return;
+  }
+
+  const modCase = await createCase({
+    guildId: message.guild.id, action: "JAIL", targetUser: targetMember.user,
+    moderator: client.user, reason, duration: durationMs, durationString: durationFormatted,
+  });
+
+  scheduleJailRelease(client, message.guild.id, targetMember.id, modCase.caseId, durationMs);
+
+  const expiresTs  = Math.floor((Date.now() + durationMs) / 1000);
+  const logChannel = message.guild.channels.cache.get(MOD_LOG_CHANNEL_ID);
+
+  if (logChannel) {
+    const logEmbed = buildLogEmbed({
+      action: "JAIL", caseId: modCase.caseId, targetUser: targetMember.user,
+      moderator: client.user, reason, duration: durationFormatted,
+    });
+    logEmbed.addFields(
+      { name: "Expires", value: `<t:${expiresTs}:F>`, inline: false },
+      { name: "Trigger", value: `Automatically triggered at ${totalWarns} active warnings`, inline: false },
+    );
+    await logSend(logChannel, [logEmbed]);
+  }
+
+  try {
+    await targetMember.send({ embeds: [buildDMEmbed({
+      action: "JAIL", guild: message.guild, moderator: client.user,
+      reason, caseId: modCase.caseId, duration: durationFormatted,
+    })] });
+  } catch (_) {}
+}
+
 async function handleWarn(message, args, client) {
   const targetMember =
     message.mentions.members?.first() ||
@@ -530,7 +799,6 @@ async function handleWarn(message, args, client) {
     commandMessageId: message.id,
   });
 
-  // DM user
   try {
     await targetMember.send({ embeds: [buildDMEmbed({
       action: "WARN", guild: message.guild, moderator: message.author,
@@ -538,15 +806,14 @@ async function handleWarn(message, args, client) {
     })] });
   } catch (_) {}
 
-  // Log
   const logChannel  = message.guild.channels.cache.get(MOD_LOG_CHANNEL_ID);
   const commandLink = buildJumpLink(message.guild.id, message.channel.id, message.id);
 
   if (logChannel) {
-    const logMsg = await logChannel.send({ embeds: [buildLogEmbed({
+    const logMsg = await logSend(logChannel, [buildLogEmbed({
       action: "WARN", caseId: modCase.caseId, targetUser: targetMember.user,
       moderator: message.author, reason, evidence, totalWarns, history, commandLink,
-    })] }).catch(() => null);
+    })]);
     if (logMsg) await modCase.updateOne({ logMessageId: logMsg.id });
   }
 
@@ -555,9 +822,8 @@ async function handleWarn(message, args, client) {
     reason, caseId: modCase.caseId, totalWarns,
   })]);
 
-  // Escalation
   if (totalWarns >= 3 && logChannel) {
-    await logChannel.send({ embeds: [
+    await logSend(logChannel, [
       new EmbedBuilder()
         .setColor(0xFF0000)
         .setTitle("🚨 Escalation Alert")
@@ -566,8 +832,11 @@ async function handleWarn(message, args, client) {
           `Consider taking further action against **${targetMember.user.tag}** (\`${targetMember.id}\`).`
         )
         .setTimestamp(),
-    ] }).catch(() => {});
+    ]);
   }
+
+  // Auto-Jail at threshold
+  await autoJailOnWarnThreshold(message, targetMember, totalWarns, client);
 }
 
 // ── KICK ──────────────────────────────────
@@ -624,10 +893,10 @@ async function handleKick(message, args, client) {
 
   const logChannel = message.guild.channels.cache.get(MOD_LOG_CHANNEL_ID);
   if (logChannel) {
-    const logMsg = await logChannel.send({ embeds: [buildLogEmbed({
+    const logMsg = await logSend(logChannel, [buildLogEmbed({
       action: "KICK", caseId: modCase.caseId, targetUser: targetMember.user,
       moderator: message.author, reason, evidence, history, commandLink,
-    })] }).catch(() => null);
+    })]);
     if (logMsg) await modCase.updateOne({ logMessageId: logMsg.id });
   }
 
@@ -726,7 +995,7 @@ async function handleBan(message, args, client) {
       });
     }
 
-    const logMsg = await logChannel.send({ embeds: [logEmbed] }).catch(() => null);
+    const logMsg = await logSend(logChannel, [logEmbed]);
     if (logMsg) await modCase.updateOne({ logMessageId: logMsg.id });
   }
 
@@ -831,7 +1100,7 @@ async function handleTimeout(message, args, client) {
     });
     logEmbed.addFields({ name: "Expires", value: `<t:${expiresTs}:F>`, inline: false });
 
-    const logMsg = await logChannel.send({ embeds: [logEmbed] }).catch(() => null);
+    const logMsg = await logSend(logChannel, [logEmbed]);
     if (logMsg) await modCase.updateOne({ logMessageId: logMsg.id });
   }
 
@@ -846,12 +1115,13 @@ async function handleTimeout(message, args, client) {
 
 // ── UNWARN ────────────────────────────────
 async function handleUnwarn(message, args, client) {
-  const caseId = parseInt(args[0]);
+  const caseId        = parseInt(args[0]);
+  const removalReason = args.slice(1).join(" ").trim() || null;
 
   if (isNaN(caseId) || caseId < 1) {
     return respond(message, [usageEmbed(
-      ["eb unwarn <caseId>", "eb unwarn 5"],
-      [{ name: "Tip", value: "Use `eb modlogs @user` to find case IDs" }]
+      ["eb unwarn <caseId> [reason]", "eb unwarn 5", "eb unwarn 5 Appealed successfully"],
+      [{ name: "Tip", value: "Use `eb warnings @user` or `eb modlogs @user` to find case IDs" }]
     )]);
   }
 
@@ -867,7 +1137,11 @@ async function handleUnwarn(message, args, client) {
     return respond(message, [errEmbed("Already Removed", `Case **#${caseId}** has already been removed.`)]);
   }
 
-  await deactivateCase(message.guild.id, caseId);
+  await deactivateCase(message.guild.id, caseId, {
+    removedBy:    message.author.id,
+    removedByTag: message.author.tag,
+    removalReason,
+  });
 
   const ModerationLog  = getModerationLog();
   const remainingWarns = await ModerationLog.countDocuments({
@@ -887,10 +1161,11 @@ async function handleUnwarn(message, args, client) {
     action:           "UNWARN",
     targetUser,
     moderator:        message.author,
-    reason:           `Removed warning #${caseId}: ${modCase.reason?.substring(0, 80)}`,
+    reason:           removalReason || `Removed warning #${caseId}: ${modCase.reason?.substring(0, 80)}`,
     commandChannelId: message.channel.id,
     commandMessageId: message.id,
   });
+  await unwarnCase.updateOne({ relatedCaseId: caseId });
 
   const logChannel  = message.guild.channels.cache.get(MOD_LOG_CHANNEL_ID);
   const commandLink = buildJumpLink(message.guild.id, message.channel.id, message.id);
@@ -899,7 +1174,7 @@ async function handleUnwarn(message, args, client) {
     const logEmbed = buildLogEmbed({
       action: "UNWARN", caseId: unwarnCase.caseId,
       targetUser, moderator: message.author,
-      reason:     `Removed warning from case #${caseId}`,
+      reason:     removalReason || `Removed warning from case #${caseId}`,
       totalWarns: remainingWarns,
       commandLink,
     });
@@ -908,40 +1183,47 @@ async function handleUnwarn(message, args, client) {
       value: `#${caseId} — ${(modCase.reason || "No reason").substring(0, 100)}`,
       inline: false,
     });
-    await logChannel.send({ embeds: [logEmbed] }).catch(() => {});
+    await logSend(logChannel, [logEmbed]);
   }
 
-  await respond(message, [
-    new EmbedBuilder()
-      .setColor(0x2ECC71)
-      .setTitle("✅ Warning Removed")
-      .setDescription(`Warning **#${caseId}** has been removed from **${targetUser.tag || targetUser.username}**.`)
-      .addFields(
-        { name: "User",               value: `<@${targetUser.id}>`,                  inline: false },
-        { name: "Original Reason",    value: modCase.reason || "No reason provided", inline: false },
-        { name: "Remaining Warnings", value: `${remainingWarns}`,                    inline: false },
-      )
-      .setTimestamp(),
-  ]);
+  const confirmEmbed = new EmbedBuilder()
+    .setColor(0x2ECC71)
+    .setTitle("✅ Warning Removed")
+    .setDescription(`Warning **#${caseId}** has been removed from **${targetUser.tag || targetUser.username}**.`)
+    .addFields(
+      { name: "User",               value: `<@${targetUser.id}>`,                  inline: false },
+      { name: "Original Reason",    value: modCase.reason || "No reason provided", inline: false },
+      { name: "Remaining Warnings", value: `${remainingWarns}`,                    inline: false },
+    )
+    .setTimestamp();
 
-  // DM user
+  if (removalReason) {
+    confirmEmbed.addFields({ name: "Removal Reason", value: removalReason, inline: false });
+  }
+
+  await respond(message, [confirmEmbed]);
+
   try {
     const targetMember = await message.guild.members.fetch(targetUser.id).catch(() => null);
     if (targetMember) {
-      await targetMember.send({ embeds: [
-        new EmbedBuilder()
-          .setColor(0x2ECC71)
-          .setTitle("✅ Warning Removed")
-          .setDescription(`A warning has been removed from your record in **${message.guild.name}**.`)
-          .setThumbnail(message.guild.iconURL({ dynamic: true }))
-          .addFields(
-            { name: "Case Removed",       value: `#${caseId}`,       inline: false },
-            { name: "Remaining Warnings", value: `${remainingWarns}`, inline: false },
-            { name: "Questions?",         value: `[Open a support ticket](${APPEAL_CHANNEL_LINK})`, inline: false },
-          )
-          .setFooter({ text: message.guild.name })
-          .setTimestamp(),
-      ] });
+      const dmEmbed = new EmbedBuilder()
+        .setColor(0x2ECC71)
+        .setTitle("✅ Warning Removed")
+        .setDescription(`A warning has been removed from your record in **${message.guild.name}**.`)
+        .setThumbnail(message.guild.iconURL({ dynamic: true }))
+        .addFields(
+          { name: "Case Removed",       value: `#${caseId}`,       inline: false },
+          { name: "Remaining Warnings", value: `${remainingWarns}`, inline: false },
+          { name: "Questions?",         value: `[Open a support ticket](${APPEAL_CHANNEL_LINK})`, inline: false },
+        )
+        .setFooter({ text: message.guild.name })
+        .setTimestamp();
+
+      if (removalReason) {
+        dmEmbed.spliceFields(1, 0, { name: "Reason", value: removalReason, inline: false });
+      }
+
+      await targetMember.send({ embeds: [dmEmbed] });
     }
   } catch (_) {}
 }
@@ -1008,9 +1290,9 @@ async function handleCase(message, args, client) {
         value: `${moderatorUser.tag || moderatorUser.username} (<@${moderatorUser.id}>)`,
         inline: false,
       },
-      { name: "Reason", value: modCase.reason || "No reason provided",                                                   inline: false },
-      { name: "Date",   value: `<t:${Math.floor(new Date(modCase.createdAt).getTime() / 1000)}:F>`,                      inline: false },
-      { name: "Status", value: modCase.active ? "Active" : "Removed",                                                    inline: false },
+      { name: "Reason", value: modCase.reason || "No reason provided",                                     inline: false },
+      { name: "Date",   value: `<t:${Math.floor(new Date(modCase.createdAt).getTime() / 1000)}:F>`,        inline: false },
+      { name: "Status", value: modCase.active ? "Active" : "Removed",                                      inline: false },
     )
     .setFooter({ text: `${message.guild.name} • Case #${caseId}` })
     .setTimestamp();
@@ -1026,9 +1308,35 @@ async function handleCase(message, args, client) {
     });
   }
 
+  if (!modCase.active && modCase.removedAt) {
+    embed.addFields({
+      name:  "Removed",
+      value:
+        `<t:${Math.floor(new Date(modCase.removedAt).getTime() / 1000)}:F>` +
+        (modCase.removedBy ? `\nBy: <@${modCase.removedBy}>` : "") +
+        (modCase.removalReason ? `\nReason: ${modCase.removalReason}` : ""),
+      inline: false,
+    });
+  }
+
+  if (modCase.relatedCaseId) {
+    embed.addFields({
+      name:  "Related Case",
+      value: `This closed case **#${modCase.relatedCaseId}**. Use \`eb case ${modCase.relatedCaseId}\` to view it.`,
+      inline: false,
+    });
+  }
+
   const commandLink = buildJumpLink(message.guild.id, modCase.commandChannelId, modCase.commandMessageId);
   if (commandLink) {
     embed.addFields({ name: "Command Used", value: `[Jump to message](${commandLink})`, inline: false });
+  }
+
+  if (modCase.logMessageId) {
+    const logLink = buildJumpLink(message.guild.id, MOD_LOG_CHANNEL_ID, modCase.logMessageId);
+    if (logLink) {
+      embed.addFields({ name: "Log Entry", value: `[Jump to log](${logLink})`, inline: false });
+    }
   }
 
   if (modCase.evidence?.messageContent) {
@@ -1046,39 +1354,615 @@ async function handleCase(message, args, client) {
   await respond(message, [embed]);
 }
 
+// ── WARNINGS ──────────────────────────────
+async function handleWarnings(message, args, client) {
+  const caseMatch = message.content.match(/--case\s+(\d+)/i);
+  if (caseMatch) return handleCase(message, [caseMatch[1]], client);
+
+  const targetUser =
+    message.mentions.users?.first() ||
+    (args[0] && !args[0].startsWith("--")
+      ? await client.users.fetch(args[0]).catch(() => null)
+      : null);
+
+  if (!targetUser) {
+    if (getMemberLevel(message.member) < 3) {
+      return respond(message, [errEmbed(
+        "Access Denied",
+        "Only **Mastermind** or **Core Command** can view the server-wide warning overview.\n" +
+        "Use `eb warnings @user` to view a specific member's warning history."
+      )]);
+    }
+    return showGuildWarnings(message, client);
+  }
+
+  return showUserWarnings(message, targetUser, client);
+}
+
+async function showUserWarnings(message, targetUser, client) {
+  const ModerationLog = getModerationLog();
+  const warnings = await ModerationLog.find({
+    guildId: message.guild.id,
+    userId:  targetUser.id,
+    action:  "WARN",
+  }).sort({ createdAt: -1 });
+
+  if (warnings.length === 0) {
+    return respond(message, [
+      new EmbedBuilder()
+        .setColor(0x2ECC71)
+        .setTitle("📋 Warning History")
+        .setDescription(`**${targetUser.tag || targetUser.username}** has no warnings on record.`)
+        .setThumbnail(targetUser.displayAvatarURL?.({ dynamic: true }) ?? null)
+        .setTimestamp(),
+    ]);
+  }
+
+  const activeCount  = warnings.filter((w) => w.active).length;
+  const removedCount = warnings.length - activeCount;
+  const pages        = chunk(warnings, 5);
+
+  const buildEmbed = (idx) => {
+    const embed = new EmbedBuilder()
+      .setColor(0xFFAA00)
+      .setTitle(`⚠️ Warning History — ${targetUser.tag || targetUser.username}`)
+      .setThumbnail(targetUser.displayAvatarURL?.({ dynamic: true }) ?? null)
+      .addFields(
+        { name: "User",    value: `<@${targetUser.id}>\n\`${targetUser.id}\``, inline: true },
+        { name: "Active",  value: `${activeCount}`,  inline: true },
+        { name: "Removed", value: `${removedCount}`, inline: true },
+      )
+      .setFooter({ text: `Page ${idx + 1}/${pages.length} • ${warnings.length} total warning(s)` })
+      .setTimestamp();
+
+    for (const w of pages[idx]) {
+      const issuedTs = Math.floor(new Date(w.createdAt).getTime() / 1000);
+
+      const statusLine = w.active
+        ? "🟡 **Active**"
+        : `🟢 **Removed** — <t:${Math.floor(new Date(w.removedAt ?? w.updatedAt).getTime() / 1000)}:R>`;
+
+      const jumpLink = w.logMessageId
+        ? buildJumpLink(message.guild.id, MOD_LOG_CHANNEL_ID, w.logMessageId)
+        : buildJumpLink(message.guild.id, w.commandChannelId, w.commandMessageId);
+
+      let value =
+        `**Status:** ${statusLine}\n` +
+        `**Issued:** <t:${issuedTs}:F>\n` +
+        `**Moderator:** <@${w.moderatorId}>\n` +
+        `**Reason:** ${(w.reason || "No reason provided").substring(0, 200)}`;
+
+      if (!w.active) {
+        if (w.removedBy)     value += `\n**Removed By:** <@${w.removedBy}>`;
+        if (w.removalReason) value += `\n**Removal Reason:** ${w.removalReason.substring(0, 150)}`;
+      }
+
+      if (jumpLink) value += `\n[Jump to Case](${jumpLink})`;
+
+      embed.addFields({ name: `Case #${w.caseId}`, value, inline: false });
+    }
+
+    return embed;
+  };
+
+  await sendPaginated(message, pages.length, buildEmbed);
+}
+
+async function showGuildWarnings(message, client) {
+  const ModerationLog = getModerationLog();
+
+  const activeWarns = await ModerationLog.find({
+    guildId: message.guild.id,
+    action:  "WARN",
+    active:  true,
+  }).sort({ createdAt: -1 });
+
+  if (activeWarns.length === 0) {
+    return respond(message, [
+      new EmbedBuilder()
+        .setColor(0x2ECC71)
+        .setTitle("📋 Server Warnings")
+        .setDescription("No active warnings found in this server.")
+        .setTimestamp(),
+    ]);
+  }
+
+  const grouped = new Map();
+  for (const w of activeWarns) {
+    if (!grouped.has(w.userId)) grouped.set(w.userId, []);
+    grouped.get(w.userId).push(w);
+  }
+
+  const sortedUsers = [...grouped.entries()].sort((a, b) => b[1].length - a[1].length);
+  const pages        = chunk(sortedUsers, 8);
+
+  const buildEmbed = (idx) => {
+    const embed = new EmbedBuilder()
+      .setColor(0xFFAA00)
+      .setTitle("📋 Server Warnings Overview")
+      .setDescription("Members with **active** warnings, sorted by warning count.")
+      .setFooter({
+        text: `Page ${idx + 1}/${pages.length} • ${sortedUsers.length} member(s) • ${activeWarns.length} active warning(s)`,
+      })
+      .setTimestamp();
+
+    const lines = pages[idx].map(([userId, warns]) => {
+      const latest   = warns[0];
+      const latestTs = Math.floor(new Date(latest.createdAt).getTime() / 1000);
+      const caseIds  = warns.map((w) => `#${w.caseId}`).join(", ");
+      return (
+        `<@${userId}> — **${warns.length}** active warning(s)\n` +
+        `↳ Cases: ${caseIds}\n` +
+        `↳ Latest: Case #${latest.caseId} <t:${latestTs}:R>`
+      );
+    });
+
+    embed.addFields({ name: "Members", value: lines.join("\n\n") || "None", inline: false });
+    return embed;
+  };
+
+  await sendPaginated(message, pages.length, buildEmbed);
+}
+
+// ── JAIL ──────────────────────────────────
+async function handleJail(message, args, client) {
+  if (args[0]?.toLowerCase() === "status") {
+    return handleJailStatus(message, client);
+  }
+
+  if (!message.guild.members.me.permissions.has("ManageRoles")) {
+    return respond(message, [errEmbed("Missing Permission", "I don't have permission to manage roles.")]);
+  }
+
+  const targetMember =
+    message.mentions.members?.first() ||
+    (args[0] ? await message.guild.members.fetch(args[0]).catch(() => null) : null);
+
+  if (!targetMember) {
+    return respond(message, [usageEmbed(
+      [
+        "eb jail @user <duration> <reason>",
+        "eb jail @user 2h Spamming",
+        "eb jail @user 1d Rule violation",
+        "eb jail status",
+      ],
+      [{ name: "Duration Examples", value: "30m, 2h, 1d, 5d, 7d, 14d (max 28d)" }]
+    )]);
+  }
+
+  if (targetMember.id === message.author.id) {
+    return respond(message, [errEmbed("Error", "You cannot jail yourself.")]);
+  }
+  if (targetMember.id === client.user.id) {
+    return respond(message, [errEmbed("Error", "You cannot jail me.")]);
+  }
+  if (!hierarchyOk(message, targetMember)) {
+    return respond(message, [errEmbed("Hierarchy Error", "You cannot action someone with equal or higher roles.")]);
+  }
+
+  const jailRole = message.guild.roles.cache.get(JAIL_ROLE_ID);
+  if (!jailRole) {
+    return respond(message, [errEmbed("Configuration Error", "Jail role not found. Contact a developer.")]);
+  }
+  if (jailRole.position >= message.guild.members.me.roles.highest.position) {
+    return respond(message, [errEmbed("Role Hierarchy Error", "My highest role must be above the Jail role to assign it.")]);
+  }
+
+  const ModerationLog = getModerationLog();
+  const existingJail = await ModerationLog.findOne({
+    guildId: message.guild.id, userId: targetMember.id, action: "JAIL", active: true,
+  });
+  if (existingJail) {
+    return respond(message, [errEmbed("Already Jailed", `This member is already jailed under case **#${existingJail.caseId}**.`)]);
+  }
+
+  const cleanArgs   = args.filter((a) => !a.match(/^<@!?\d+>$/) && a !== targetMember.id);
+  const durationArg = cleanArgs.find((a) => /^\d+(s|m|h|d|w)$/i.test(a));
+
+  if (!durationArg) {
+    return respond(message, [usageEmbed(
+      ["eb jail @user 2h Spamming", "eb jail @user 1d Repeated violations"],
+      [{ name: "Duration Format", value: "`s` seconds · `m` minutes · `h` hours · `d` days · `w` weeks (max 28 days)" }]
+    )]);
+  }
+
+  const durationMs = parseJailDuration(durationArg);
+  if (!durationMs) {
+    return respond(message, [errEmbed("Invalid Duration", "Must be between 1 second and 28 days.\nExample: `2h`, `1d`, `5d`, `14d`")]);
+  }
+
+  const durationFormatted = formatDuration(durationMs);
+  const durationIdx       = cleanArgs.indexOf(durationArg);
+  const reason            = cleanArgs.slice(durationIdx + 1).join(" ") || "No reason provided";
+  const evidence          = await extractEvidence(message);
+  const commandLink       = buildJumpLink(message.guild.id, message.channel.id, message.id);
+  const expiresTs         = Math.floor((Date.now() + durationMs) / 1000);
+
+  try {
+    if (INITIATE_ROLE_ID && INITIATE_ROLE_ID !== "PUT_INITIATE_ROLE_ID_HERE" &&
+        targetMember.roles.cache.has(INITIATE_ROLE_ID)) {
+      await targetMember.roles.remove(INITIATE_ROLE_ID);
+    }
+    await targetMember.roles.add(JAIL_ROLE_ID);
+  } catch (err) {
+    return respond(message, [errEmbed("Role Error", "Failed to update roles. Check my permissions and role position.")]);
+  }
+
+  try {
+    await targetMember.send({ embeds: [buildDMEmbed({
+      action: "JAIL", guild: message.guild, moderator: message.author,
+      reason, caseId: "pending", duration: durationFormatted, evidence,
+    })] });
+  } catch (_) {}
+
+  const modCase = await createCase({
+    guildId: message.guild.id, action: "JAIL", targetUser: targetMember.user,
+    moderator: message.author, reason, duration: durationMs, durationString: durationFormatted,
+    evidence, commandChannelId: message.channel.id, commandMessageId: message.id,
+  });
+
+  scheduleJailRelease(client, message.guild.id, targetMember.id, modCase.caseId, durationMs);
+
+  const logChannel = message.guild.channels.cache.get(MOD_LOG_CHANNEL_ID);
+  if (logChannel) {
+    const logEmbed = buildLogEmbed({
+      action: "JAIL", caseId: modCase.caseId, targetUser: targetMember.user,
+      moderator: message.author, reason, duration: durationFormatted, evidence, commandLink,
+    });
+    logEmbed.addFields({ name: "Expires", value: `<t:${expiresTs}:F>`, inline: false });
+    const logMsg = await logSend(logChannel, [logEmbed]);
+    if (logMsg) await modCase.updateOne({ logMessageId: logMsg.id });
+  }
+
+  const confirmEmbed = buildConfirmEmbed({
+    action: "JAIL", targetUser: targetMember.user, reason, caseId: modCase.caseId, duration: durationFormatted,
+  });
+  confirmEmbed.addFields({ name: "Expires", value: `<t:${expiresTs}:F>`, inline: false });
+
+  await respond(message, [confirmEmbed]);
+}
+
+async function handleJailStatus(message, client) {
+  const ModerationLog = getModerationLog();
+  const isStaff = hasModPermission(message.member);
+
+  if (!isStaff) {
+    const activeJail = await ModerationLog.findOne({
+      guildId: message.guild.id, userId: message.author.id, action: "JAIL", active: true,
+    });
+
+    if (!activeJail) {
+      return respond(message, [errEmbed("Not Jailed", "You are not currently in Jail.")]);
+    }
+
+    const expiresTs = Math.floor(new Date(activeJail.expiresAt).getTime() / 1000);
+    const embed = new EmbedBuilder()
+      .setColor(0x8B0000)
+      .setTitle("⛓️ Your Jail Status")
+      .addFields(
+        { name: "Reason",         value: activeJail.reason || "No reason provided", inline: false },
+        { name: "Remaining Time", value: `<t:${expiresTs}:R>`, inline: true },
+        { name: "Release Date",   value: `<t:${expiresTs}:F>`, inline: true },
+        { name: "Case",           value: `#${activeJail.caseId}`, inline: true },
+      )
+      .setTimestamp();
+
+    return respond(message, [embed]);
+  }
+
+  const activeJails = await ModerationLog.find({
+    guildId: message.guild.id, action: "JAIL", active: true,
+  }).sort({ expiresAt: 1 });
+
+  if (activeJails.length === 0) {
+    return respond(message, [
+      new EmbedBuilder()
+        .setColor(0x2ECC71)
+        .setTitle("⛓️ Jail Status")
+        .setDescription("No members are currently jailed.")
+        .setTimestamp(),
+    ]);
+  }
+
+  const pages = chunk(activeJails, 8);
+
+  const buildEmbed = (idx) => {
+    const embed = new EmbedBuilder()
+      .setColor(0x8B0000)
+      .setTitle("⛓️ Active Jail Sentences")
+      .setFooter({ text: `Page ${idx + 1}/${pages.length} • ${activeJails.length} jailed member(s)` })
+      .setTimestamp();
+
+    const lines = pages[idx].map((j) => {
+      const expiresTs = Math.floor(new Date(j.expiresAt).getTime() / 1000);
+      return (
+        `<@${j.userId}> — Case #${j.caseId}\n` +
+        `↳ Expires: <t:${expiresTs}:R> (<t:${expiresTs}:F>)\n` +
+        `↳ Reason: ${(j.reason || "No reason").substring(0, 80)}`
+      );
+    });
+
+    embed.addFields({ name: "Members", value: lines.join("\n\n"), inline: false });
+    return embed;
+  };
+
+  await sendPaginated(message, pages.length, buildEmbed);
+}
+
+// ── UNJAIL ────────────────────────────────
+async function handleUnjail(message, args, client) {
+  if (!message.guild.members.me.permissions.has("ManageRoles")) {
+    return respond(message, [errEmbed("Missing Permission", "I don't have permission to manage roles.")]);
+  }
+
+  const targetMember =
+    message.mentions.members?.first() ||
+    (args[0] ? await message.guild.members.fetch(args[0]).catch(() => null) : null);
+
+  if (!targetMember) {
+    return respond(message, [usageEmbed(["eb unjail @user <reason>", "eb unjail @user Appeal accepted"])]);
+  }
+
+  const ModerationLog = getModerationLog();
+  const activeJail = await ModerationLog.findOne({
+    guildId: message.guild.id, userId: targetMember.id, action: "JAIL", active: true,
+  });
+
+  if (!activeJail) {
+    return respond(message, [errEmbed("Not Jailed", "This member does not have an active Jail sentence.")]);
+  }
+
+  const reason = parseReason(message.content, "unjail", !!message.mentions.members?.first());
+
+  clearJailTimer(message.guild.id, targetMember.id);
+
+  try {
+    await targetMember.roles.remove(JAIL_ROLE_ID).catch(() => {});
+    if (INITIATE_ROLE_ID && INITIATE_ROLE_ID !== "PUT_INITIATE_ROLE_ID_HERE") {
+      await targetMember.roles.add(INITIATE_ROLE_ID).catch(() => {});
+    }
+  } catch (_) {}
+
+  await deactivateCase(message.guild.id, activeJail.caseId, {
+    removedBy: message.author.id, removedByTag: message.author.tag, removalReason: reason,
+  });
+
+  const unjailCase = await createCase({
+    guildId: message.guild.id, action: "UNJAIL", targetUser: targetMember.user,
+    moderator: message.author, reason, commandChannelId: message.channel.id, commandMessageId: message.id,
+  });
+  await unjailCase.updateOne({ relatedCaseId: activeJail.caseId });
+
+  const logChannel  = message.guild.channels.cache.get(MOD_LOG_CHANNEL_ID);
+  const commandLink = buildJumpLink(message.guild.id, message.channel.id, message.id);
+
+  if (logChannel) {
+    const logEmbed = buildLogEmbed({
+      action: "UNJAIL", caseId: unjailCase.caseId, targetUser: targetMember.user,
+      moderator: message.author, reason, commandLink,
+    });
+    logEmbed.addFields({ name: "Released From", value: `Case #${activeJail.caseId}`, inline: false });
+    await logSend(logChannel, [logEmbed]);
+  }
+
+  try {
+    await targetMember.send({ embeds: [buildDMEmbed({
+      action: "UNJAIL", guild: message.guild, moderator: message.author, reason, caseId: unjailCase.caseId,
+    })] });
+  } catch (_) {}
+
+  await respond(message, [buildConfirmEmbed({
+    action: "UNJAIL", targetUser: targetMember.user, reason, caseId: unjailCase.caseId,
+  })]);
+}
+
+// ── PARDON ────────────────────────────────
+const PARDON_TYPES = {
+  jail:    { action: "JAIL",    resultAction: "UNJAIL",    label: "Jail"    },
+  timeout: { action: "TIMEOUT", resultAction: "UNTIMEOUT", label: "Timeout" },
+  ban:     { action: "BAN",     resultAction: "UNBAN",     label: "Ban"     },
+};
+
+async function handlePardon(message, args, client) {
+  const targetUser =
+    message.mentions.users?.first() ||
+    (args[0] ? await client.users.fetch(args[0]).catch(() => null) : null);
+
+  const mentionStripped = args.filter((a) => !a.match(/^<@!?\d+>$/) && a !== targetUser?.id);
+  const typeIdx = mentionStripped.findIndex((a) => Object.keys(PARDON_TYPES).includes(a.toLowerCase()));
+
+  if (!targetUser || typeIdx === -1) {
+    return respond(message, [usageEmbed(
+      [
+        "eb pardon @user <jail|timeout|ban> <reason>",
+        "eb pardon @user jail Appeal accepted",
+        "eb pardon @user ban Mistaken identity",
+      ],
+      [{ name: "Note", value: "Use `eb unwarn` for warnings. Red flags are not handled by this command." }]
+    )]);
+  }
+
+  const type   = mentionStripped[typeIdx].toLowerCase();
+  const meta   = PARDON_TYPES[type];
+  const reason = mentionStripped.slice(typeIdx + 1).join(" ") || "No reason provided";
+
+  const ModerationLog = getModerationLog();
+  const activeCase = await ModerationLog.findOne({
+    guildId: message.guild.id, userId: targetUser.id, action: meta.action, active: true,
+  }).sort({ createdAt: -1 });
+
+  if (!activeCase) {
+    return respond(message, [errEmbed("Not Found", `No active **${meta.label}** punishment found for **${targetUser.tag || targetUser.username}**.`)]);
+  }
+
+  const targetMember = await message.guild.members.fetch(targetUser.id).catch(() => null);
+
+  if (type === "jail") {
+    clearJailTimer(message.guild.id, targetUser.id);
+    if (targetMember) {
+      await targetMember.roles.remove(JAIL_ROLE_ID).catch(() => {});
+      if (INITIATE_ROLE_ID && INITIATE_ROLE_ID !== "PUT_INITIATE_ROLE_ID_HERE") {
+        await targetMember.roles.add(INITIATE_ROLE_ID).catch(() => {});
+      }
+    }
+  } else if (type === "timeout") {
+    if (targetMember) {
+      await targetMember.timeout(null, `[${message.author.tag}] Pardoned: ${reason}`).catch(() => {});
+    }
+  } else if (type === "ban") {
+    await message.guild.members.unban(targetUser.id, `[${message.author.tag}] Pardoned: ${reason}`).catch(() => {});
+  }
+
+  await deactivateCase(message.guild.id, activeCase.caseId, {
+    removedBy: message.author.id, removedByTag: message.author.tag, removalReason: reason,
+  });
+
+  const pardonCase = await createCase({
+    guildId: message.guild.id, action: meta.resultAction, targetUser,
+    moderator: message.author, reason,
+    commandChannelId: message.channel.id, commandMessageId: message.id,
+  });
+  await pardonCase.updateOne({ relatedCaseId: activeCase.caseId });
+
+  const logChannel  = message.guild.channels.cache.get(MOD_LOG_CHANNEL_ID);
+  const commandLink = buildJumpLink(message.guild.id, message.channel.id, message.id);
+
+  if (logChannel) {
+    const logEmbed = buildLogEmbed({
+      action: meta.resultAction, caseId: pardonCase.caseId, targetUser,
+      moderator: message.author, reason, commandLink,
+    });
+    logEmbed.addFields({ name: "Pardoned Case", value: `#${activeCase.caseId} (${meta.label})`, inline: false });
+    await logSend(logChannel, [logEmbed]);
+  }
+
+  if (targetMember) {
+    try {
+      await targetMember.send({ embeds: [buildDMEmbed({
+        action: meta.resultAction, guild: message.guild, moderator: message.author,
+        reason, caseId: pardonCase.caseId,
+      })] });
+    } catch (_) {}
+  }
+
+  await respond(message, [
+    new EmbedBuilder()
+      .setColor(0x2ECC71)
+      .setTitle(`🕊️ Pardon Granted — ${meta.label}`)
+      .setDescription(`**${targetUser.tag || targetUser.username}** has been pardoned.`)
+      .addFields(
+        { name: "Pardoned Case", value: `#${activeCase.caseId}`, inline: true },
+        { name: "New Case",      value: `#${pardonCase.caseId}`, inline: true },
+        { name: "Reason",        value: reason,                  inline: false },
+      )
+      .setTimestamp(),
+  ]);
+}
+
 // ── MODHELP ───────────────────────────────
 async function handleModhelp(message) {
   const level = getMemberLevel(message.member);
 
-  const allCommands = [
-    { cmd: "eb warn @user [reason]",               desc: "Issue a warning to a user",                       level: 1 },
-    { cmd: "eb timeout @user <duration> [reason]", desc: "Timeout a user (s / m / h / d / w, max 28d)",    level: 1 },
-    { cmd: "eb kick @user [reason]",               desc: "Kick a user from the server",                     level: 3 },
-    { cmd: "eb ban @user [--days N] [reason]",     desc: "Permanently ban a user",                          level: 3 },
-    { cmd: "eb unwarn <caseId>",                   desc: "Remove a warning by its case ID",                 level: 3 },
-    { cmd: "eb modlogs @user",                     desc: "View full moderation history of a user",          level: 1 },
-    { cmd: "eb case <caseId>",                     desc: "View full details of a specific case",            level: 1 },
+  const categories = [
+    {
+      name:     "⚠️ Warning Commands",
+      minLevel: 1,
+      commands: [
+        { cmd: "eb warn @user [reason]",      desc: "Issue a warning. Reply to a message to attach it as evidence.",        level: 1 },
+        { cmd: "eb unwarn <caseId> [reason]", desc: "Remove a warning by case ID. Reason is logged as the removal reason.", level: 3 },
+        { cmd: "eb warnings @user",           desc: "Full warning timeline for one member — issued, removed, by whom, why, with jump links.", level: 1 },
+        { cmd: "eb warnings",                 desc: "Server-wide overview of every member with active warnings.",          level: 3 },
+      ],
+    },
+    {
+      name:     "🔇 Timeouts",
+      minLevel: 1,
+      commands: [
+        { cmd: "eb timeout @user <duration> [reason]", desc: "Timeout a member. Duration: `s/m/h/d/w` (max 28 days).", level: 1 },
+      ],
+    },
+    {
+      name:     "🔒 Jail",
+      minLevel: 3,
+      commands: [
+        { cmd: "eb jail @user <time> <reason>", desc: "Remove Initiate, apply Jail, create a timed case. Examples: `30m`, `2h`, `1d`, `5d`, `7d`, `14d`.", level: 3 },
+        { cmd: "eb jail status",                desc: "Jailed members see only their own sentence; staff see every active Jail sentence.", level: 1 },
+        { cmd: "eb unjail @user <reason>",      desc: "End an active Jail sentence and restore Initiate.", level: 3 },
+      ],
+    },
+    {
+      name:     "🕊️ Pardons",
+      minLevel: 3,
+      commands: [
+        { cmd: "eb pardon @user <jail|timeout|ban> <reason>", desc: "Close the latest matching active punishment. Jail pardons restore roles. Use `eb unwarn` for warnings.", level: 3 },
+      ],
+    },
+    {
+      name:     "👢🔨 Kicks & Bans",
+      minLevel: 3,
+      commands: [
+        { cmd: "eb kick @user [reason]",           desc: "Kick a member from the server.", level: 3 },
+        { cmd: "eb ban @user [--days N] [reason]", desc: "Permanently ban a member. `--days` deletes N days of messages (max 7).", level: 3 },
+      ],
+    },
+    {
+      name:     "🗂️ Cases & History",
+      minLevel: 1,
+      commands: [
+        { cmd: "eb case <caseId>",                  desc: "Full details of one case — evidence, jump links, removal info, related case.", level: 1 },
+        { cmd: "eb modlogs @user",                  desc: "Summarized moderation history (all action types) for a member.",               level: 1 },
+        { cmd: "eb modlogs @user --case <caseId>",  desc: "Jump directly to a specific case.",                                            level: 1 },
+        { cmd: "eb warnings @user --case <caseId>", desc: "Jump directly to a specific warning case.",                                     level: 1 },
+      ],
+    },
+    {
+      name:     "🛠️ General",
+      minLevel: 1,
+      commands: [
+        { cmd: "eb modhelp  /  eb mh", desc: "Show this help menu.", level: 1 },
+      ],
+    },
   ];
 
-  const fields = allCommands
-    .filter((c) => c.level <= level)
-    .map((c) => ({ name: c.cmd, value: c.desc, inline: false }));
+  const embed = new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle("🛡️ Moderation Command Guide")
+    .setDescription(
+      "Complete reference for AvaBot's moderation cases, Jail and warning system.\n" +
+      `Your permission level: **${level}**\n\n` +
+      "_Reply to any message before using a mod command to automatically attach it as evidence._"
+    )
+    .setFooter({ text: "All moderation actions are logged to the mod-log channel." })
+    .setTimestamp();
 
-  fields.push({
-    name:  "Evidence",
-    value: "Reply to any message before using a mod command to attach it as evidence automatically.",
-    inline: false,
-  });
+  for (const cat of categories) {
+    if (cat.minLevel > level) continue;
+    const availableCmds = cat.commands.filter((c) => c.level <= level);
+    if (availableCmds.length === 0) continue;
 
-  await respond(message, [
-    new EmbedBuilder()
-      .setColor(0x5865F2)
-      .setTitle("🛡️ Moderation Commands")
-      .setDescription("Commands available to your role:")
-      .addFields(fields)
-      .setFooter({ text: "All actions are logged to the mod-log channel." })
-      .setTimestamp(),
-  ]);
+    const value = availableCmds.map((c) => `\`${c.cmd}\`\n↳ ${c.desc}`).join("\n\n");
+    embed.addFields({ name: cat.name, value, inline: false });
+  }
+
+  embed.addFields(
+    {
+      name:  "🚨 Warning Escalation",
+      value:
+        `• Warnings remain **active** until removed with \`eb unwarn\`.\n` +
+        `• At **3+ active warnings**, an escalation alert is posted in the mod-log channel.\n` +
+        `• At exactly **${AUTO_JAIL_WARN_THRESHOLD} active warnings**, the member is **automatically jailed** for \`${AUTO_JAIL_DURATION}\`.`,
+      inline: false,
+    },
+    {
+      name:  "🔒 Jail Notes",
+      value:
+        "• Expired Jail sentences are released automatically — including after a bot restart.\n" +
+        "• Use `eb pardon @user jail <reason>` or `eb unjail @user <reason>` to release early.",
+      inline: false,
+    },
+  );
+
+  await respond(message, [embed]);
 }
 
 // ════════════════════════════════════════════
@@ -1088,27 +1972,42 @@ module.exports = {
   name: "moderation",
   commands: MOD_COMMANDS,
 
-  // No-op now — nothing to initialise
-  init(_client) {},
+  // Starts the Jail auto-release scheduler and recovers state after restarts.
+  init(client) {
+    sweepExpiredJails(client);
+    setInterval(() => sweepExpiredJails(client), 5 * 60 * 1000); // fallback sweep every 5 min
+  },
 
   async execute(message, args, client, commandName) {
-    if (!hasModPermission(message.member)) {
-      return respond(message, [errEmbed("Access Denied", "You don't have permission to use moderation commands.")]);
-    }
-    if (!canUseCommand(message.member, commandName)) {
-      return respond(message, [errEmbed("Access Denied", `Your role cannot use \`eb ${commandName}\`.`)]);
-    }
+    commandName = COMMAND_ALIASES[commandName] || commandName;
 
     try {
+      // "eb jail status" must be usable by everyone — a jailed non-staff member
+      // needs to be able to check their own remaining time without mod permission.
+      if (commandName === "jail" && args[0]?.toLowerCase() === "status") {
+        return await handleJailStatus(message, client);
+      }
+
+      if (!hasModPermission(message.member)) {
+        return respond(message, [errEmbed("Access Denied", "You don't have permission to use moderation commands.")]);
+      }
+      if (!canUseCommand(message.member, commandName)) {
+        return respond(message, [errEmbed("Access Denied", `Your role cannot use \`eb ${commandName}\`.`)]);
+      }
+
       switch (commandName) {
-        case "warn":    return await handleWarn   (message, args, client);
-        case "kick":    return await handleKick   (message, args, client);
-        case "ban":     return await handleBan    (message, args, client);
-        case "timeout": return await handleTimeout(message, args, client);
-        case "unwarn":  return await handleUnwarn (message, args, client);
-        case "modlogs": return await handleModlogs(message, args, client);
-        case "case":    return await handleCase   (message, args, client);
-        case "modhelp": return await handleModhelp(message);
+        case "warn":     return await handleWarn    (message, args, client);
+        case "kick":     return await handleKick    (message, args, client);
+        case "ban":      return await handleBan     (message, args, client);
+        case "timeout":  return await handleTimeout (message, args, client);
+        case "unwarn":   return await handleUnwarn  (message, args, client);
+        case "modlogs":  return await handleModlogs (message, args, client);
+        case "case":     return await handleCase    (message, args, client);
+        case "warnings": return await handleWarnings(message, args, client);
+        case "jail":     return await handleJail    (message, args, client);
+        case "unjail":   return await handleUnjail  (message, args, client);
+        case "pardon":   return await handlePardon  (message, args, client);
+        case "modhelp":  return await handleModhelp (message);
         default:
           return respond(message, [errEmbed("Unknown Command", "Use `eb modhelp` for a list of commands.")]);
       }
