@@ -64,6 +64,7 @@ module.exports = {
           feature: client.features?.amanTrumpetReminder,
         },
         { name: "summonerManager", feature: client.features?.summonerManager },
+        { name: "mentionReaction", feature: client.features?.mentionReaction },
       ];
 
       for (const { name, feature } of featuresToInitialize) {

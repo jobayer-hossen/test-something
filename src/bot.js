@@ -1,4 +1,3 @@
-
 const http = require("http");
 const https = require("https");
 const {
@@ -19,6 +18,7 @@ const ActivityTracker = require("./features/ActivityTracker");
 const RoleManager = require("./features/RoleManager");
 const SummonerManager = require("./features/SummonerManager");
 const WelcomeMessageFeature = require("./features/welcomeMessage");
+const MentionReactionFeature = require("./features/MentionReactionFeature");
 const CoinRainFeature = require("./features/coinRain");
 const LootBoxSummoningFeature = require("./features/LootBoxSummoningFeature");
 const AmanCoinMention = require("./features/amanTrumpetReminder");
@@ -247,9 +247,7 @@ class EpicRPGBot {
       try {
         await fs.access(slashCommandsPath);
       } catch {
-        logger.warn(
-          "⚠️ Slash commands directory not found (optional feature)",
-        );
+        logger.warn("⚠️ Slash commands directory not found (optional feature)");
         return;
       }
 
@@ -338,7 +336,9 @@ class EpicRPGBot {
 
     // 🔒 Prevent overlapping login attempts
     if (this.isConnecting) {
-      logger.warn("⚠️ Login already in progress. Skipping duplicate attempt...");
+      logger.warn(
+        "⚠️ Login already in progress. Skipping duplicate attempt...",
+      );
       return;
     }
 
@@ -718,10 +718,7 @@ class EpicRPGBot {
     });
 
     process.on("uncaughtException", (error) => {
-      console.error(
-        "❌ UNCAUGHT EXCEPTION:",
-        error.message?.substring(0, 300),
-      );
+      console.error("❌ UNCAUGHT EXCEPTION:", error.message?.substring(0, 300));
       console.error(error.stack?.substring(0, 500));
 
       if (this.client?.errorCount) {
@@ -879,8 +876,9 @@ class EpicRPGBot {
 
       this.client.features.roleManager = new RoleManager(this.client);
 
-
-
+      this.client.features.mentionReaction = new MentionReactionFeature(
+        this.client,
+      );
 
       this.client.features.summonerManager = new SummonerManager(this.client);
 
