@@ -17,7 +17,6 @@ const database = require("./database/connection");
 // Features
 const ActivityTracker = require("./features/ActivityTracker");
 const RoleManager = require("./features/RoleManager");
-const InactivityMonitor = require("./features/InactivityMonitor");
 const SummonerManager = require("./features/SummonerManager");
 const WelcomeMessageFeature = require("./features/welcomeMessage");
 const CoinRainFeature = require("./features/coinRain");
@@ -880,9 +879,8 @@ class EpicRPGBot {
 
       this.client.features.roleManager = new RoleManager(this.client);
 
-      this.client.features.inactivityMonitor = new InactivityMonitor(
-        this.client,
-      );
+
+
 
       this.client.features.summonerManager = new SummonerManager(this.client);
 

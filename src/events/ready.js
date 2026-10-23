@@ -63,10 +63,6 @@ module.exports = {
           name: "amanTrumpetReminder",
           feature: client.features?.amanTrumpetReminder,
         },
-        {
-          name: "inactivityMonitor",
-          feature: client.features?.inactivityMonitor,
-        },
         { name: "summonerManager", feature: client.features?.summonerManager },
       ];
 
