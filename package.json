@@ -4,8 +4,8 @@
   "description": "Epic Bot",
   "main": "src/bot.js",
   "scripts": {
-    "start": "node src/bot.js",
-    "dev": "nodemon src/bot.js"
+    "start": "node init && node src/bot.js",
+    "dev": "node init && nodemon src/bot.js"
   },
   "engines": {
     "node": "20.x"
