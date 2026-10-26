@@ -1,7 +1,7 @@
-const Logger = require('../logger');
-const MentionReaction = require('../database/schemas/MentionReaction');
+const Logger = require("../logger");
+const MentionReaction = require("../database/schemas/MentionReaction");
 
-const logger = new Logger('MentionReaction');
+const logger = new Logger("MentionReaction");
 
 class MentionReactionFeature {
   constructor(client) {
@@ -13,9 +13,12 @@ class MentionReactionFeature {
   }
 
   initialize() {
-    this.client.on('messageCreate', this.handleMessage.bind(this));
-    this.cleanupInterval = setInterval(() => this.cleanupCooldowns(), 60 * 60 * 1000);
-    logger.info('MentionReactionFeature initialized');
+    this.client.on("messageCreate", this.handleMessage.bind(this));
+    this.cleanupInterval = setInterval(
+      () => this.cleanupCooldowns(),
+      60 * 60 * 1000,
+    );
+    logger.info("MentionReactionFeature initialized");
   }
 
   cleanupCooldowns() {
@@ -27,17 +30,21 @@ class MentionReactionFeature {
 
   async handleMessage(message) {
     try {
-      // Only real human messages trigger this
       if (message.author.bot) return;
       if (message.webhookId) return;
       if (!message.guild) return;
       if (message.mentions.everyone) return;
       if (message.mentions.users.size === 0) return;
 
-      // Only real human accounts can be targets - never react/respond for bot mentions
-      const mentionedUsers = message.mentions.users.filter(
-        (u) => !u.bot && u.id !== message.author.id
-      );
+      // Only count EXPLICIT @mentions typed in the content —
+      // excludes users pinged automatically via "reply" notifications
+      const mentionedUsers = message.mentions.users.filter((u) => {
+        if (u.bot || u.id === message.author.id) return false;
+        return (
+          message.content.includes(`<@${u.id}>`) ||
+          message.content.includes(`<@!${u.id}>`)
+        );
+      });
 
       if (mentionedUsers.size === 0) return;
 
@@ -52,7 +59,9 @@ class MentionReactionFeature {
         const lastTrigger = this.cooldowns.get(user.id);
         if (lastTrigger && now - lastTrigger < this.cooldownMs) continue;
 
-        const settings = await MentionReaction.findOne({ userId: user.id }).lean();
+        const settings = await MentionReaction.findOne({
+          userId: user.id,
+        }).lean();
         if (!settings) continue;
 
         let triggered = false;
@@ -82,7 +91,7 @@ class MentionReactionFeature {
         if (triggered) this.cooldowns.set(user.id, now);
       }
     } catch (error) {
-      logger.error('Error in MentionReactionFeature:', error);
+      logger.error("Error in MentionReactionFeature:", error);
     }
   }
 
